@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aurora Run</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05080f; display: flex; justify-content: center; align-items: center; }
+  canvas { height: 100vh; max-width: 100vw; aspect-ratio: 2 / 3; display: block; background: #000; }
+</style>
+</head>
+<body>
+<canvas id="game" width="480" height="720"></canvas>
+<script>
+(function () {
+  "use strict";
+  const cv = document.getElementById("game");
+  const ctx = cv.getContext("2d");
+
+  // ---------- Settings you can tweak ----------
+  const W = 480, H = 720;
+  const HZ = 150;                 // horizon line (where cars appear)
+  const RL = 90, RR = 390;        // road left / right edge
+  const PY = 590, PW = 40, PH = 70; // player y position, width, height
+  const LANES = [140, 240, 340];
+  const START_LIVES = 3;
+  const FUEL_DRAIN = 3.5;         // fuel lost per second
+  const NEAR_GAP = 26;            // pixels: how close counts as a near miss
+  const NEAR_FUEL = 14;           // fuel gained per near miss
+  const COLORS = ["#4cc9f0", "#f4d35e", "#8ac926", "#b5179e", "#ff9f1c", "#e5e5e5"];
+
+  // ---------- Game state ----------
+  const keys = {};
+  let state = "menu";             // "menu" | "play" | "over"
+  let best = 0, clock = 0, shake = 0, overAt = 0;
+  let px, cars, popups, score, fuel, lives, speed, dist, t, spawnT, inv, reason;
+
+  function reset() {
+    px = 240; cars = []; popups = [];
+    score = 0; fuel = 100; lives = START_LIVES;
+    speed = 260; dist = 0; t = 0; spawnT = 0.6; inv = 0; reason = "";
+  }
+  reset();
+
+  // ---------- Input ----------
+  addEventListener("keydown", function (e) {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].indexOf(e.key) >= 0) e.preventDefault();
+    keys[e.key] = true;
+    if ((e.key === "Enter" || e.key === " ") && state !== "play") {
+      if (state === "over" && Date.now() - overAt < 600) return;
+      reset(); state = "play";
+    }
+  });
+  addEventListener("keyup", function (e) { keys[e.key] = false; });
+  addEventListener("blur", function () { for (const k in keys) keys[k] = false; });
+
+  // ---------- Traffic ----------
+  function spawn() {
+    const lane = LANES[(Math.random() * 3) | 0];
+    const x = lane + (Math.random() * 30 - 15);
+    if (Math.random() < 0.22) {
+      cars.push({ x: x, y: HZ - 30, w: 36, h: 30, v: 0, rock: true, gap: 999, done: false });
+    } else {
+      cars.push({ x: x, y: HZ - 50, w: 40, h: 70, v: 90 + Math.random() * 60,
+                  color: COLORS[(Math.random() * COLORS.length) | 0], gap: 999, done: false });
+    }
+  }
+
+  function endGame(why) {
+    state = "over"; reason = why; overAt = Date.now();
+    best = Math.max(best, score);
+  }
+
+  // ---------- Update ----------
+  function update(dt) {
+    t += dt;
+    const L = keys.ArrowLeft || keys.a || keys.A;
+    const R = keys.ArrowRight || keys.d || keys.D;
+    const U = keys.ArrowUp || keys.w || keys.W;
+    const D = keys.ArrowDown || keys.s || keys.S;
+
+    if (U) speed += 220 * dt;
+    else if (D) speed -= 300 * dt;
+    else speed += (260 - speed) * 0.8 * dt;
+    speed = Math.max(180, Math.min(520, speed));
+
+    px += ((R ? 1 : 0) - (L ? 1 : 0)) * (220 + speed * 0.25) * dt;
+    px = Math.max(RL + PW / 2 + 4, Math.min(RR - PW / 2 - 4, px));
+    dist += speed * dt;
+
+    fuel -= (FUEL_DRAIN + t * 0.015) * dt;
+    if (fuel <= 0) { fuel = 0; endGame("Out of fuel"); return; }
+
+    spawnT -= dt;
+    if (spawnT <= 0) {
+      spawn();
+      spawnT = Math.max(0.35, 1.1 - t * 0.008) * (300 / speed);
+    }
+    inv -= dt;
+
+    for (let i = cars.length - 1; i >= 0; i--) {
+      const c = cars[i];
+      c.y += (speed - c.v) * dt;
+      const gapX = Math.abs(c.x - px) - (c.w + PW) / 2;
+      const gapY = Math.abs(c.y - PY) - (c.h + PH) / 2;
+
+      if (gapX < -2 && gapY < -2 && inv <= 0) {      // crash
+        lives--; inv = 1.6; speed = 180; shake = 0.35;
+        popups.push({ txt: "CRASH!", x: px, y: PY - 60, t: 1, color: "#ff5d5d" });
+        cars.splice(i, 1);
+        if (lives <= 0) { endGame("Out of lives"); return; }
+        continue;
+      }
+      if (gapY < 0 && !c.done) c.gap = Math.min(c.gap, gapX);
+      if (!c.done && c.y - c.h / 2 > PY + PH / 2) {  // car has fully passed us
+        c.done = true;
+        if (c.gap >= 0 && c.gap < NEAR_GAP) {
+          const pts = 100 + Math.round(((speed - 180) / 340) * 100);
+          score += pts; fuel = Math.min(100, fuel + NEAR_FUEL);
+          popups.push({ txt: "NEAR MISS +" + pts, x: px, y: PY - 80, t: 1, color: "#7dffb2" });
+        }
+      }
+      if (c.y > H + 100) cars.splice(i, 1);
+    }
+  }
+
+  // ---------- Drawing helpers ----------
+  const stars = [];
+  for (let i = 0; i < 60; i++) stars.push({ x: Math.random() * W, y: Math.random() * (HZ - 20), r: Math.random() * 1.4 + 0.3, p: Math.random() * 6 });
+
+  function poly(pts, color) {
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(pts[0][0], HZ);
+    for (const p of pts) ctx.lineTo(p[0], p[1]);
+    ctx.lineTo(W, HZ); ctx.closePath(); ctx.fill();
+  }
+  function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+  }
+  function txt(s, x, y, size, color, align, weight) {
+    ctx.font = (weight || "600") + " " + size + "px system-ui, -apple-system, Segoe UI, sans-serif";
+    ctx.fillStyle = color; ctx.textAlign = align || "center"; ctx.fillText(s, x, y);
+  }
+
+  function drawSky() {
+    const g = ctx.createLinearGradient(0, 0, 0, HZ);
+    g.addColorStop(0, "#050a1c"); g.addColorStop(1, "#10304a");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, HZ);
+    for (const s of stars) {
+      ctx.globalAlpha = 0.5 + 0.5 * Math.sin(clock * 2 + s.p);
+      ctx.fillStyle = "#fff"; ctx.fillRect(s.x, s.y, s.r, s.r);
+    }
+    ctx.globalAlpha = 1;
+    const bands = [["80,255,170", 0], ["60,220,255", 1], ["180,120,255", 2]];
+    for (const b of bands) {
+      const rgb = b[0], k = b[1];
+      const ag = ctx.createLinearGradient(0, 10, 0, HZ);
+      ag.addColorStop(0, "rgba(" + rgb + ",0)");
+      ag.addColorStop(0.35, "rgba(" + rgb + ",0.55)");
+      ag.addColorStop(1, "rgba(" + rgb + ",0)");
+      const f = function (x) { return 30 + k * 14 + Math.sin(x * 0.011 + clock * 0.5 + k * 2) * 16; };
+      ctx.fillStyle = ag; ctx.beginPath(); ctx.moveTo(0, f(0));
+      for (let x = 0; x <= W; x += 10) ctx.lineTo(x, f(x));
+      for (let x = W; x >= 0; x -= 10) ctx.lineTo(x, f(x) + 70);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  function drawMountains() {
+    poly([[0,90],[60,55],[110,95],[170,35],[230,100],[290,60],[350,25],[420,90],[480,50]], "#1b2a4a");
+    ctx.fillStyle = "rgba(225,240,255,0.85)";
+    for (const p of [[170,35],[350,25],[60,55]]) {
+      ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0] - 15, p[1] + 24); ctx.lineTo(p[0] + 15, p[1] + 24); ctx.closePath(); ctx.fill();
+    }
+    poly([[0,120],[40,95],[90,125],[140,80],[200,128],[260,110],[330,85],[400,125],[450,100],[480,115]], "#0c162b");
+  }
+
+  function drawGround() {
+    ctx.fillStyle = "#0d2620"; ctx.fillRect(0, HZ, W, H - HZ);
+    ctx.fillStyle = "#272a33"; ctx.fillRect(RL, HZ, RR - RL, H - HZ);
+    ctx.fillStyle = "#e8eef5"; ctx.fillRect(RL - 3, HZ, 4, H - HZ); ctx.fillRect(RR - 1, HZ, 4, H - HZ);
+    ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 3;
+    ctx.setLineDash([30, 30]); ctx.lineDashOffset = -(dist % 60);
+    for (const x of [190, 290]) { ctx.beginPath(); ctx.moveTo(x, HZ); ctx.lineTo(x, H); ctx.stroke(); }
+    ctx.setLineDash([]);
+    // pine trees on both sides, scrolling with the road
+    const span = H - HZ, gapT = span / 10;
+    for (let i = 0; i < 10; i++) {
+      for (let side = 0; side < 2; side++) {
+        const y = HZ + ((i * gapT + dist + side * 29) % span);
+        const hsh = ((i * 37 + side * 11) % 7) / 7;
+        const x = side === 0 ? 10 + hsh * 62 : RR + 18 + hsh * 62;
+        const s = 0.5 + ((y - HZ) / span) * 0.9;
+        ctx.fillStyle = "#0a3b2c";
+        ctx.beginPath(); ctx.moveTo(x, y - 34 * s); ctx.lineTo(x - 15 * s, y); ctx.lineTo(x + 15 * s, y); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "rgba(220,240,255,0.5)";
+        ctx.beginPath(); ctx.moveTo(x, y - 34 * s); ctx.lineTo(x - 6 * s, y - 18 * s); ctx.lineTo(x + 6 * s, y - 18 * s); ctx.closePath(); ctx.fill();
+      }
+    }
+  }
+
+  function drawCar(x, y, w, h, color, isPlayer) {
+    ctx.fillStyle = "#101114";                       // wheels
+    for (const dx of [-w / 2 - 3, w / 2 - 3]) for (const dy of [-h / 2 + 8, h / 2 - 22]) ctx.fillRect(x + dx, y + dy, 6, 15);
+    ctx.fillStyle = color; rr(x - w / 2, y - h / 2, w, h, 9); ctx.fill();   // body
+    ctx.fillStyle = "rgba(10,20,35,0.8)"; rr(x - w / 2 + 6, y - h / 2 + 16, w - 12, 18, 4); ctx.fill();  // roof glass
+    ctx.fillStyle = isPlayer ? "#ff2e2e" : "#ffe9a8";                         // lights
+    ctx.fillRect(x - w / 2 + 4, y + h / 2 - 6, 9, 4); ctx.fillRect(x + w / 2 - 13, y + h / 2 - 6, 9, 4);
+  }
+
+  function drawRock(c) {
+    ctx.fillStyle = "#7b8190"; ctx.beginPath(); ctx.ellipse(c.x, c.y, c.w / 2, c.h / 2, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#a3a9b7"; ctx.beginPath(); ctx.ellipse(c.x - 4, c.y - 4, c.w / 4, c.h / 4, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawHud() {
+    ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, 96);
+    txt("Score " + score, 16, 30, 20, "#ffffff", "left", "700");
+    txt("Best " + best, 16, 52, 14, "#b9c6de", "left", "500");
+    txt("\u2665".repeat(Math.max(0, lives)), W - 16, 32, 24, "#ff5d6c", "right", "400");
+    txt("Fuel", 16, 82, 14, "#b9c6de", "left", "500");
+    ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(62, 70, 200, 14);
+    ctx.fillStyle = fuel > 30 ? "#4ade80" : fuel > 15 ? "#fb923c" : "#ef4444";
+    ctx.fillRect(62, 70, 2 * fuel, 14);
+  }
+
+  function overlay(lines) {
+    ctx.fillStyle = "rgba(3,8,20,0.68)"; ctx.fillRect(0, 0, W, H);
+    for (const l of lines) txt(l[0], W / 2, l[1], l[2], l[3], "center", l[4]);
+  }
+
+  function render() {
+    ctx.save();
+    if (shake > 0) ctx.translate((Math.random() - 0.5) * 30 * shake, (Math.random() - 0.5) * 30 * shake);
+    drawSky(); drawMountains(); drawGround();
+
+    ctx.save();                                       // cars emerge from the horizon
+    ctx.beginPath(); ctx.rect(RL - 8, HZ, RR - RL + 16, H - HZ); ctx.clip();
+    for (const c of cars) { if (c.rock) drawRock(c); else drawCar(c.x, c.y, c.w, c.h, c.color, false); }
+    ctx.restore();
+
+    if (inv <= 0 || Math.floor(clock * 12) % 2) drawCar(px, PY, PW, PH, "#e63946", true);
+
+    for (const p of popups) { ctx.globalAlpha = Math.max(0, p.t); txt(p.txt, p.x, p.y, 22, p.color, "center", "800"); }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    if (state !== "menu") drawHud();
+    const blink = Math.floor(clock * 2) % 2 ? "#ffffff" : "#9fb4d6";
+    if (state === "menu") {
+      overlay([
+        ["AURORA RUN", 250, 46, "#7dffb2", "800"],
+        ["Arrow keys: steer, speed up, slow down", 320, 17, "#e6eefc", "500"],
+        ["Pass close to cars for near misses", 352, 17, "#e6eefc", "500"],
+        ["Near misses give points and refill fuel", 384, 17, "#e6eefc", "500"],
+        ["You have 3 lives. Do not run out of fuel.", 416, 17, "#e6eefc", "500"],
+        ["Press Enter or Space to start", 490, 20, blink, "700"]
+      ]);
+    } else if (state === "over") {
+      overlay([
+        ["GAME OVER", 270, 46, "#ff7b7b", "800"],
+        [reason, 306, 18, "#e6eefc", "500"],
+        ["Score " + score, 358, 28, "#ffffff", "700"],
+        ["Best " + best, 392, 18, "#b9c6de", "500"],
+        ["Press Enter or Space to try again", 470, 20, blink, "700"]
+      ]);
+    }
+  }
+
+  // ---------- Main loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now; clock += dt;
+    shake = Math.max(0, shake - dt);
+    if (state === "play") update(dt); else dist += 120 * dt;
+    for (let i = popups.length - 1; i >= 0; i--) {
+      popups[i].t -= dt * 0.9; popups[i].y -= 40 * dt;
+      if (popups[i].t <= 0) popups.splice(i, 1);
+    }
+    render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
