@@ -42,6 +42,9 @@
     { name: "Heavy Traffic", rate: 0.5, gap: 850,  rock: 0.1,  vmin: 450,  vrange: 450 }
   ];
   let mode = 0;
+  const WHEELS = [{ name: "Silver", c: "#c9d1de" }, { name: "Gold", c: "#f2c14e" }, { name: "Red", c: "#e63946" }, { name: "Blue", c: "#3a86ff" }, { name: "Black", c: "#2a2d35" }, { name: "Lime", c: "#9bf24a" }];
+  const SPOILERS = ["Stock", "None", "Lip", "GT Wing", "Big Wing"];
+  const custom = CARS.map(function () { return { wheel: 0, spoiler: 0 }; });   // each car remembers its own setup
     let car = CARS[0], sel = 0;
   const LEN = 520;                 // car length used for traffic collisions
   const FUEL_DRAIN = 3.5;          // fuel lost per second
@@ -86,6 +89,8 @@
       if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") sel = (sel + CARS.length - 1) % CARS.length;
       if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") sel = (sel + 1) % CARS.length;
       if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "w" || e.key === "W" || e.key === "s" || e.key === "S" || e.key === "t" || e.key === "T") mode = (mode + 1) % MODES.length;
+      if (e.key === "r" || e.key === "R") custom[sel].wheel = (custom[sel].wheel + 1) % WHEELS.length;
+      if (e.key === "f" || e.key === "F") custom[sel].spoiler = (custom[sel].spoiler + 1) % SPOILERS.length;
       if (e.key === "Enter" || e.key === " ") start();
     } else if (state === "over") {
       if (Date.now() - overAt < 600) return;
@@ -98,11 +103,15 @@
     const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) * W / r.width, my = (e.clientY - r.top) * H / r.height;
     for (let i = 0; i < CARS.length; i++) {
       const x0 = 22 + i * 132;
-      if (mx > x0 && mx < x0 + 124 && my > 112 && my < 348) { if (sel === i) start(); else sel = i; }
+      if (mx > x0 && mx < x0 + 124 && my > 96 && my < 328) { if (sel === i) start(); else sel = i; }
+    }
+    if (my > 336 && my < 372) {
+      if (mx > W / 2 - 230 && mx < W / 2 - 10) custom[sel].wheel = (custom[sel].wheel + 1) % WHEELS.length;
+      if (mx > W / 2 + 10 && mx < W / 2 + 230) custom[sel].spoiler = (custom[sel].spoiler + 1) % SPOILERS.length;
     }
     for (let m = 0; m < MODES.length; m++) {
       const bx = W / 2 - 230 + m * 240;
-      if (mx > bx && mx < bx + 220 && my > 374 && my < 412) mode = m;
+      if (mx > bx && mx < bx + 220 && my > 400 && my < 434) mode = m;
     }
   });
   addEventListener("keyup", function (e) { keys[e.key] = false; });
@@ -127,7 +136,7 @@
     if (lane < 0) return;
     const x = LANES[lane] + (Math.random() * 180 - 90);
     const r = Math.random(), type = r < 0.25 ? "van" : r < 0.55 ? "sport" : "sedan";
-    if (Math.random() < MODES[mode].rock) objs.push({ kind: "rock", lane: lane, x: x, z: z, w: 260, v: 0, rock: true, gap: 9999, done: false });
+    if (Math.random() < MODES[mode].rock) objs.push({ kind: "rock", lane: lane, x: Math.max(-(RW - 170), Math.min(RW - 170, LANES[lane] + (Math.random() * 2 - 1) * 260)), z: z, w: 110 + Math.random() * 70, seed: Math.random(), v: 0, rock: true, gap: 9999, done: false });
     else objs.push({ kind: "car", lane: lane, x: x, z: z, w: type === "van" ? 440 : 400, type: type, v: MODES[mode].vmin + Math.random() * MODES[mode].vrange,
                      color: COLORS[(Math.random() * COLORS.length) | 0], gap: 9999, done: false });
   }
@@ -403,15 +412,33 @@
     return g;
   }
 
+  // Rim colour (the chosen wheel colour, or plain silver for traffic) with simple spokes.
+  function drawRim(tx, tw, by, th, opt) {
+    ctx.fillStyle = opt ? WHEELS[opt.wheel].c : "#aab3c2"; rr(tx + tw * 0.2, by - th * 0.9, tw * 0.6, th * 0.45, tw * 0.14); ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(tx + tw * 0.48, by - th * 0.9, Math.max(1, tw * 0.04), th * 0.45); ctx.fillRect(tx + tw * 0.2, by - th * 0.68, tw * 0.6, Math.max(1, th * 0.04));
+  }
+  // Spoiler options: 1 none, 2 lip, 3 GT wing, 4 big wing. y is the top of the body.
+  function spoiler(kind, x0, w, h, y, color) {
+    if (kind === 1) return;
+    const cx = x0 + w / 2, dk = "#101216";
+    if (kind === 2) { ctx.fillStyle = shade(color, 0.55); rr(x0 + w * 0.08, y - h * 0.035, w * 0.84, h * 0.07, w * 0.02); ctx.fill(); return; }
+    const big = kind === 4, wy = y - h * (big ? 0.26 : 0.15), wh = h * (big ? 0.1 : 0.07), ww = w * (big ? 1.06 : 0.94), wx = cx - ww / 2;
+    ctx.fillStyle = dk; ctx.fillRect(cx - w * 0.24, wy + wh, w * 0.035, y - wy - wh + h * 0.02); ctx.fillRect(cx + w * 0.205, wy + wh, w * 0.035, y - wy - wh + h * 0.02);
+    rr(wx, wy, ww, wh, wh * 0.4); ctx.fill();
+    ctx.fillStyle = color; ctx.fillRect(wx + ww * 0.04, wy + wh * 0.35, ww * 0.92, Math.max(1, wh * 0.25));
+    ctx.fillStyle = dk; const ph = wh + h * (big ? 0.12 : 0.06), py = wy - h * (big ? 0.07 : 0.03);
+    ctx.fillRect(wx - w * 0.01, py, w * 0.025, ph); ctx.fillRect(wx + ww - w * 0.015, py, w * 0.025, ph);
+  }
+
   // McLaren P1 style hypercar from behind: low and wide, big active wing, slim LED lights, twin central exhausts.
-  function drawHyper(cx, by, w, color) {
+  function drawHyper(cx, by, w, color, opt) {
     const h = w * 0.46, x0 = cx - w / 2, px = Math.max(1, w * 0.012);
     ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.beginPath(); ctx.ellipse(cx, by, w * 0.57, h * 0.12, 0, 0, Math.PI * 2); ctx.fill();
     const tw = w * 0.21, th = h * 0.46;
     for (const tx of [x0 - tw * 0.1, x0 + w - tw * 0.9]) {
       ctx.fillStyle = "#0b0c0f"; rr(tx, by - th, tw, th, tw * 0.3); ctx.fill();
       ctx.fillStyle = "#23262e"; rr(tx + tw * 0.15, by - th * 0.92, tw * 0.7, th * 0.5, tw * 0.2); ctx.fill();
-      ctx.fillStyle = "#c7ced9"; ctx.fillRect(tx + tw * 0.3, by - th * 0.8, tw * 0.4, Math.max(1, th * 0.07));
+      drawRim(tx, tw, by, th, opt);
       ctx.fillStyle = color; ctx.fillRect(tx + tw * 0.4, by - th * 0.68, tw * 0.2, Math.max(1, th * 0.1));      // brake caliper
     }
     const bTop = by - h * 0.62, bBot = by - h * 0.12;
@@ -434,10 +461,11 @@
     ctx.fillStyle = "#101216"; rr(cx - w * 0.27, bTop + h * 0.03, w * 0.54, h * 0.15, w * 0.02); ctx.fill();     // engine cover louvers
     ctx.fillStyle = "#2b2f38"; for (let k = 1; k < 8; k++) ctx.fillRect(cx - w * 0.27 + k * w * 0.0675, bTop + h * 0.03, Math.max(0.5, px * 0.6), h * 0.15);
     const wy = bTop - h * 0.14;                                       // active rear wing
+    if (opt && opt.spoiler > 0) spoiler(opt.spoiler, x0, w, h, bTop, color); else {
     ctx.fillStyle = "#0d0e11"; ctx.fillRect(cx - w * 0.22, wy + h * 0.08, w * 0.03, h * 0.2); ctx.fillRect(cx + w * 0.19, wy + h * 0.08, w * 0.03, h * 0.2);
     rr(x0 - w * 0.01, wy, w * 1.02, h * 0.1, h * 0.04); ctx.fill();
     ctx.fillStyle = color; ctx.fillRect(x0 + w * 0.03, wy + h * 0.04, w * 0.94, Math.max(1, h * 0.025));
-    ctx.fillStyle = "#0d0e11"; ctx.fillRect(x0 - w * 0.015, wy - h * 0.06, w * 0.025, h * 0.2); ctx.fillRect(x0 + w * 0.99, wy - h * 0.06, w * 0.025, h * 0.2);
+    ctx.fillStyle = "#0d0e11"; ctx.fillRect(x0 - w * 0.015, wy - h * 0.06, w * 0.025, h * 0.2); ctx.fillRect(x0 + w * 0.99, wy - h * 0.06, w * 0.025, h * 0.2); }
     const ly = bTop + h * 0.26;                                       // slim LED tail lights
     ctx.fillStyle = "rgba(255,40,40,0.3)"; rr(x0 + w * 0.05, ly - h * 0.03, w * 0.34, h * 0.11, h * 0.04); ctx.fill(); rr(x0 + w * 0.61, ly - h * 0.03, w * 0.34, h * 0.11, h * 0.04); ctx.fill();
     ctx.fillStyle = "#e01616"; rr(x0 + w * 0.07, ly, w * 0.3, h * 0.05, h * 0.02); ctx.fill(); rr(x0 + w * 0.63, ly, w * 0.3, h * 0.05, h * 0.02); ctx.fill();
@@ -456,8 +484,8 @@
   }
 
   // A car seen from behind, w pixels wide, standing on row by. type: sedan, sport, van, muscle or brute.
-  function drawCarRear(cx, by, w, color, type) {
-    if (type === "hyper") return drawHyper(cx, by, w, color);
+  function drawCarRear(cx, by, w, color, type, opt) {
+    if (type === "hyper") return drawHyper(cx, by, w, color, opt);
     const van = type === "van", sport = type === "sport", brute = type === "brute", mus = type === "muscle" || brute;
     const h = w * (van ? 0.9 : sport ? 0.52 : mus ? 0.5 : 0.62);
     const x0 = cx - w / 2, px = Math.max(1, w * 0.012);
@@ -467,7 +495,7 @@
     for (const tx of [x0 - tw * 0.05, x0 + w - tw * 0.95]) {
       ctx.fillStyle = "#0b0c0f"; rr(tx, by - th, tw, th, tw * 0.3); ctx.fill();
       ctx.fillStyle = "#23262e"; rr(tx + tw * 0.15, by - th * 0.92, tw * 0.7, th * 0.5, tw * 0.2); ctx.fill();
-      ctx.fillStyle = "#aab3c2"; ctx.fillRect(tx + tw * 0.3, by - th * 0.8, tw * 0.4, Math.max(1, th * 0.07));
+      drawRim(tx, tw, by, th, opt);
     }
     // body: gradient, top highlight, lower crease
     const bTop = by - h * (van ? 0.95 : mus ? 0.58 : 0.62), bBot = by - h * 0.14;
@@ -511,8 +539,10 @@
       ctx.fillRect(cx - w * 0.14, bTop + h * 0.02, w * 0.08, bBot - bTop - h * 0.2); ctx.fillRect(cx + w * 0.06, bTop + h * 0.02, w * 0.08, bBot - bTop - h * 0.2);
       ctx.fillRect(cx - w * 0.14, cTop, w * 0.08, h * 0.05); ctx.fillRect(cx + w * 0.06, cTop, w * 0.08, h * 0.05);
     }
-    if (sport) { ctx.fillStyle = shade(color, 0.55); rr(x0 + w * 0.04, bTop - h * 0.01, w * 0.92, h * 0.08, w * 0.02); ctx.fill(); }
-    if (mus) {
+    const stockSp = !opt || opt.spoiler === 0;
+    if (!stockSp) spoiler(opt.spoiler, x0, w, h, bTop, color);
+    if (stockSp && sport) { ctx.fillStyle = shade(color, 0.55); rr(x0 + w * 0.04, bTop - h * 0.01, w * 0.92, h * 0.08, w * 0.02); ctx.fill(); }
+    if (stockSp && mus) {
       ctx.fillStyle = shade(color, 0.5);
       if (brute) {                                                     // big wing on uprights
         rr(x0 + w * 0.02, bTop - h * 0.1, w * 0.96, h * 0.07, w * 0.015); ctx.fill();
@@ -567,9 +597,12 @@
     }
   }
 
-  function drawRock(cx, by, w) {
-    ctx.fillStyle = "#7b8190"; ctx.beginPath(); ctx.ellipse(cx, by - w * 0.22, w / 2, w * 0.25, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#a3a9b7"; ctx.beginPath(); ctx.ellipse(cx - w * 0.1, by - w * 0.3, w * 0.22, w * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+  function drawRock(cx, by, w, sd) {
+    sd = sd || 0.5; const a = (sd - 0.5) * 0.3;
+    ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.ellipse(cx, by, w * 0.55, w * 0.08, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#6b7180"; ctx.beginPath(); ctx.ellipse(cx, by - w * 0.2, w / 2, w * (0.2 + sd * 0.1), a, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#8e95a5"; ctx.beginPath(); ctx.ellipse(cx - w * 0.12, by - w * 0.28, w * 0.24, w * 0.1, a, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#7b8190"; ctx.beginPath(); ctx.ellipse(cx + (sd < 0.5 ? 0.5 : -0.5) * w, by - w * 0.06, w * 0.14, w * 0.08, 0, 0, Math.PI * 2); ctx.fill();
   }
 
   function drawAnimal(x, by, w, o, zA) {
@@ -633,7 +666,7 @@
       const p = K / zA, s = p / CAMH;
       const x = W / 2 + (o.x - xp + off(o.z) - ref) * s, by = HZ + p;
       const ww = o.w * s;
-      if (o.rock) drawRock(x, by, ww);
+      if (o.rock) drawRock(x, by, ww, o.seed);
       else if (o.kind === "animal") drawAnimal(x, by, ww, o, zA);
       else if (o.kind === "police") drawPolice(x, by, ww);
       else if (o.kind === "rival") drawRival(x, by, ww, o.color);
@@ -665,54 +698,90 @@
   }
   function drawMenu(blink) {
     ctx.fillStyle = "rgba(3,8,20,0.74)"; ctx.fillRect(0, 0, W, H);
-    txt("AURORA RUN 3D", W / 2, 62, 46, "#7dffb2", "center", "800");
-    txt("Choose your car", W / 2, 92, 20, "#e6eefc", "center", "500");
+    txt("AURORA RUN 3D", W / 2, 56, 44, "#7dffb2", "center", "800");
+    txt("Choose and customize your car", W / 2, 82, 18, "#e6eefc", "center", "500");
     const labels = ["Speed", "Handling", "Economy", "Armor"];
     for (let i = 0; i < CARS.length; i++) {
-      const c = CARS[i], x0 = 22 + i * 132, y0 = 112, on = i === sel;
-      ctx.fillStyle = on ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.06)"; rr(x0, y0, 124, 236, 14); ctx.fill();
+      const c = CARS[i], x0 = 22 + i * 132, y0 = 96, on = i === sel;
+      ctx.fillStyle = on ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.06)"; rr(x0, y0, 124, 232, 14); ctx.fill();
       if (on) { ctx.strokeStyle = "#7dffb2"; ctx.lineWidth = 3; ctx.stroke(); }
-      drawCarRear(x0 + 62, y0 + 96, 82 * c.w / 400, c.color, c.type);
-      txt(c.name, x0 + 62, y0 + 130, c.name.length > 8 ? 16 : 19, "#fff", "center", "800");
-      txt(c.desc, x0 + 62, y0 + 148, 10, "#b9c6de", "center", "500");
+      drawCarRear(x0 + 62, y0 + 88, 82 * c.w / 400, c.color, c.type, custom[i]);
+      txt(c.name, x0 + 62, y0 + 122, c.name.length > 8 ? 16 : 19, "#fff", "center", "800");
+      txt(c.desc, x0 + 62, y0 + 140, 10, "#b9c6de", "center", "500");
       for (let j = 0; j < 4; j++) {
-        const yy = y0 + 166 + j * 16;
+        const yy = y0 + 158 + j * 16;
         txt(labels[j], x0 + 7, yy + 8, 10, "#b9c6de", "left", "500");
         ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(x0 + 54, yy, 64, 8);
         ctx.fillStyle = c.color; ctx.fillRect(x0 + 54, yy, 64 * c.st[j], 8);
       }
     }
-    txt("Traffic mode  (Up / Down or click)", W / 2, 366, 15, "#e6eefc", "center", "500");
+    const cu = custom[sel];
+    for (let k = 0; k < 2; k++) {
+      const bx = W / 2 - 230 + k * 240;
+      ctx.fillStyle = "rgba(255,255,255,0.1)"; rr(bx, 336, 220, 36, 10); ctx.fill();
+      if (k === 0) {
+        ctx.fillStyle = WHEELS[cu.wheel].c; ctx.beginPath(); ctx.arc(bx + 22, 354, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#0b0c0f"; ctx.lineWidth = 3; ctx.stroke();
+        txt("Wheels (R): " + WHEELS[cu.wheel].name, bx + 42, 360, 15, "#fff", "left", "700");
+      } else txt("Spoiler (F): " + SPOILERS[cu.spoiler], bx + 14, 360, 15, "#fff", "left", "700");
+    }
+    txt("Traffic mode  (Up / Down or click)", W / 2, 394, 14, "#e6eefc", "center", "500");
     for (let m = 0; m < MODES.length; m++) {
       const bx = W / 2 - 230 + m * 240, on = m === mode;
-      ctx.fillStyle = on ? "rgba(125,255,178,0.28)" : "rgba(255,255,255,0.07)"; rr(bx, 374, 220, 38, 10); ctx.fill();
+      ctx.fillStyle = on ? "rgba(125,255,178,0.28)" : "rgba(255,255,255,0.07)"; rr(bx, 400, 220, 34, 10); ctx.fill();
       if (on) { ctx.strokeStyle = "#7dffb2"; ctx.lineWidth = 3; ctx.stroke(); }
-      txt(MODES[m].name, bx + 110, 399, 18, on ? "#fff" : "#9fb4d6", "center", "700");
+      txt(MODES[m].name, bx + 110, 424, 17, on ? "#fff" : "#9fb4d6", "center", "700");
     }
-    txt("Left / Right or click to choose a car  |  Arrows to drive  |  C: camera", W / 2, 440, 15, "#e6eefc", "center", "500");
-    txt("Near misses refill fuel. Drive fast for bonus points.", W / 2, 460, 15, "#ffd166", "center", "600");
-    txt("Press Enter or Space to start", W / 2, 508, 26, blink, "center", "700");
+    txt("Left / Right or click to choose a car  |  Arrows to drive  |  C: camera", W / 2, 458, 15, "#e6eefc", "center", "500");
+    txt("Near misses refill fuel. Drive fast for bonus points.", W / 2, 478, 15, "#ffd166", "center", "600");
+    txt("Press Enter or Space to start", W / 2, 516, 26, blink, "center", "700");
   }
 
-  // First-person view: hood, pillars, roof and mirror.
+  // First-person view: hood, pillars, mirror, dash with gauges, and a steering wheel that turns with the car.
+  function gauge(x, y, r, f, col) {
+    ctx.fillStyle = "#07090d"; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 4; ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.beginPath(); ctx.arc(x, y, r - 6, Math.PI * 0.75, Math.PI * 2.25); ctx.stroke();
+    ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(x, y, r - 6, Math.PI * 0.75, Math.PI * (0.75 + 1.5 * f)); ctx.stroke();
+    const an = Math.PI * (0.75 + 1.5 * f);
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(an) * (r - 9), y + Math.sin(an) * (r - 9)); ctx.stroke();
+    ctx.fillStyle = "#ccc"; ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+  }
   function drawCockpit() {
     ctx.save();
     ctx.translate(-yaw * 60, Math.sin(clock * 40) * speedFactor() * 1.5);
-    const g = ctx.createLinearGradient(0, H - 110, 0, H); g.addColorStop(0, shade(car.color, 1.2)); g.addColorStop(1, shade(car.color, 0.55));
-    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(40, H + 10); ctx.bezierCurveTo(250, H - 100, 710, H - 100, W - 40, H + 10); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(150, H - 50); ctx.bezierCurveTo(300, H - 90, 660, H - 90, 810, H - 50); ctx.stroke();
+    const g = ctx.createLinearGradient(0, H - 190, 0, H); g.addColorStop(0, shade(car.color, 1.2)); g.addColorStop(1, shade(car.color, 0.55));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(30, H + 10); ctx.bezierCurveTo(250, H - 215, 710, H - 215, W - 30, H + 10); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(170, H - 100); ctx.bezierCurveTo(320, H - 170, 640, H - 170, 790, H - 100); ctx.stroke();
     if (car.type === "muscle" || car.type === "brute") {
-      ctx.fillStyle = car.type === "brute" ? "#15161a" : "#f4f4f4"; ctx.fillRect(W / 2 - 52, H - 92, 34, 92); ctx.fillRect(W / 2 + 18, H - 92, 34, 92);
-      ctx.fillStyle = "#0b0c0f"; rr(W / 2 - 44, H - 84, 88, 20, 8); ctx.fill();
+      ctx.fillStyle = car.type === "brute" ? "#15161a" : "#f4f4f4"; ctx.fillRect(W / 2 - 52, H - 170, 34, 70); ctx.fillRect(W / 2 + 18, H - 170, 34, 70);
+      ctx.fillStyle = "#0b0c0f"; rr(W / 2 - 44, H - 160, 88, 18, 8); ctx.fill();
     }
     ctx.restore();
-    ctx.fillStyle = "#0c0e13";
+    ctx.fillStyle = "#0c0e13";                                       // pillars, roof, mirror
     ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(95, 0); ctx.lineTo(0, 270); ctx.closePath(); ctx.fill();
     ctx.beginPath(); ctx.moveTo(W, 0); ctx.lineTo(W - 95, 0); ctx.lineTo(W, 270); ctx.closePath(); ctx.fill();
     const rg = ctx.createLinearGradient(0, 0, 0, 50); rg.addColorStop(0, "#0c0e13"); rg.addColorStop(1, "rgba(12,14,19,0)");
     ctx.fillStyle = rg; ctx.fillRect(0, 0, W, 50);
     ctx.fillStyle = "#0c0e13"; rr(W / 2 - 74, 8, 148, 38, 8); ctx.fill();
     ctx.fillStyle = "#1b2740"; rr(W / 2 - 68, 13, 136, 28, 6); ctx.fill();
+    // dash
+    const dg = ctx.createLinearGradient(0, H - 130, 0, H); dg.addColorStop(0, "#1b1e26"); dg.addColorStop(1, "#090a0d");
+    ctx.fillStyle = dg; ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, H - 72); ctx.quadraticCurveTo(W / 2, H - 132, W, H - 72); ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = car.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, H - 72); ctx.quadraticCurveTo(W / 2, H - 132, W, H - 72); ctx.stroke();
+    ctx.fillStyle = "#07080b"; rr(140, H - 62, 100, 16, 5); ctx.fill(); rr(W - 240, H - 62, 100, 16, 5); ctx.fill();
+    ctx.fillStyle = "#2a2d35"; for (let k = 1; k < 6; k++) { ctx.fillRect(140 + k * 16.6, H - 62, 1.5, 16); ctx.fillRect(W - 240 + k * 16.6, H - 62, 1.5, 16); }
+    const sp = Math.max(0, Math.min(1, (speed - MIN_SPEED) / (car.maxSp - MIN_SPEED)));
+    gauge(W / 2 - 82, H - 70, 38, 0.3 + 0.55 * ((speed / car.maxSp * 5) % 1), "#ff7b5c");
+    gauge(W / 2 + 82, H - 70, 38, sp, "#7dffb2");
+    // steering wheel
+    ctx.save(); ctx.translate(W / 2, H - 48); ctx.rotate(steer * 1.1); ctx.lineCap = "round";
+    ctx.strokeStyle = "#15171c"; ctx.lineWidth = 18; ctx.beginPath(); ctx.ellipse(0, 0, 130, 64, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(0, -2, 130, 64, 0, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+    ctx.strokeStyle = "#1b1e25"; ctx.lineWidth = 16; ctx.beginPath(); ctx.moveTo(-126, 0); ctx.lineTo(-30, 6); ctx.moveTo(126, 0); ctx.lineTo(30, 6); ctx.moveTo(0, 10); ctx.lineTo(0, 58); ctx.stroke();
+    ctx.fillStyle = "#101216"; ctx.beginPath(); ctx.ellipse(0, 4, 40, 24, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = car.color; ctx.beginPath(); ctx.arc(0, 4, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(-5, -73, 10, 16);                                   // top marker shows how far the wheel is turned
+    ctx.restore();
   }
 
   function render() {
@@ -722,7 +791,7 @@
     if (fpv && state !== "menu") { if (inv <= 0 || Math.floor(clock * 12) % 2) drawCockpit(); }
     else if (state !== "menu" && (inv <= 0 || Math.floor(clock * 12) % 2)) {
       ctx.save(); ctx.translate(W / 2, HZ + K / ZP); ctx.rotate(-yaw * 0.4);        // body rolls outward in a turn
-      drawCarRear(0, 0, car.w * (K / ZP) / CAMH, car.color, car.type);
+      drawCarRear(0, 0, car.w * (K / ZP) / CAMH, car.color, car.type, custom[sel]);
       ctx.restore();
     }
     if (state === "play" && speedFactor() > 0) {                 // speed streaks at the screen edges
