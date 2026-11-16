@@ -20,7 +20,10 @@
   // ---------- Settings you can tweak ----------
   const W = 960, H = 540;
   const HZ = 200;                  // horizon row on screen
-  const K = 68000, CAMH = 819;     // perspective constants (row p below horizon = K / distance)
+  let K = 68000, CAMH = 819;      // perspective constants (row p below horizon = K / distance)
+  let fpv = false;                 // C toggles first-person view
+  function setCam() { CAMH = fpv ? 520 : 819; K = Math.round(68000 / 819 * CAMH); }
+  function camD() { return fpv ? dist + ZP : dist; }
   const ZP = 252;                  // how far ahead of the camera the player car sits
   const RW = 1300;                 // road half width (world units)
   const LANES = [-975, -325, 325, 975];   // 4 lanes, 650 wide each
@@ -78,6 +81,7 @@
   addEventListener("keydown", function (e) {
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].indexOf(e.key) >= 0) e.preventDefault();
     keys[e.key] = true;
+    if (e.key === "c" || e.key === "C") { fpv = !fpv; setCam(); if (state === "play") popups.push({ txt: fpv ? "FIRST PERSON" : "THIRD PERSON", x: W / 2, y: 130, t: 1, color: "#ffffff" }); }
     if (state === "menu") {
       if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") sel = (sel + CARS.length - 1) % CARS.length;
       if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") sel = (sel + 1) % CARS.length;
@@ -345,7 +349,7 @@
   function drawRoad() {
     const ref = off(dist + ZP);
     for (let y = HZ + 1; y < H; y++) {
-      const p = y - HZ, z = K / p, zw = dist + z, s = p / CAMH;
+      const p = y - HZ, z = K / p, zw = camD() + z, s = p / CAMH;
       const far = z > 6000;
       const stripe = far ? 0 : Math.floor(zw / 300) & 1;
       const cx = W / 2 + (off(zw) - ref - xp) * s;
@@ -366,10 +370,10 @@
   }
 
   function drawTrees() {
-    const ref = off(dist + ZP), base = Math.floor(dist / 450);
+    const ref = off(dist + ZP), cd = camD(), base = Math.floor(cd / 450);
     for (let i = 70; i >= 1; i--) {
-      const n = base + i, zw = n * 450, zA = zw - dist;
-      if (zA < 200) continue;
+      const n = base + i, zw = n * 450, zA = zw - cd;
+      if (zA < (fpv ? 110 : 200)) continue;
       const p = K / zA; if (p > H - HZ) continue;
       const s = p / CAMH;
       for (let side = -1; side <= 1; side += 2) {
@@ -624,8 +628,8 @@
     const ref = off(dist + ZP);
     const list = objs.slice().sort(function (a, b) { return b.z - a.z; });
     for (const o of list) {
-      const zA = o.z - dist;
-      if (zA < 200 || zA > 7500) continue;
+      const zA = o.z - camD();
+      if (zA < (fpv ? 110 : 200) || zA > 7500) continue;
       const p = K / zA, s = p / CAMH;
       const x = W / 2 + (o.x - xp + off(o.z) - ref) * s, by = HZ + p;
       const ww = o.w * s;
@@ -685,16 +689,38 @@
       if (on) { ctx.strokeStyle = "#7dffb2"; ctx.lineWidth = 3; ctx.stroke(); }
       txt(MODES[m].name, bx + 110, 399, 18, on ? "#fff" : "#9fb4d6", "center", "700");
     }
-    txt("Left / Right or click to choose a car  |  Arrows to drive", W / 2, 440, 15, "#e6eefc", "center", "500");
+    txt("Left / Right or click to choose a car  |  Arrows to drive  |  C: camera", W / 2, 440, 15, "#e6eefc", "center", "500");
     txt("Near misses refill fuel. Drive fast for bonus points.", W / 2, 460, 15, "#ffd166", "center", "600");
     txt("Press Enter or Space to start", W / 2, 508, 26, blink, "center", "700");
+  }
+
+  // First-person view: hood, pillars, roof and mirror.
+  function drawCockpit() {
+    ctx.save();
+    ctx.translate(-yaw * 60, Math.sin(clock * 40) * speedFactor() * 1.5);
+    const g = ctx.createLinearGradient(0, H - 110, 0, H); g.addColorStop(0, shade(car.color, 1.2)); g.addColorStop(1, shade(car.color, 0.55));
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(40, H + 10); ctx.bezierCurveTo(250, H - 100, 710, H - 100, W - 40, H + 10); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(150, H - 50); ctx.bezierCurveTo(300, H - 90, 660, H - 90, 810, H - 50); ctx.stroke();
+    if (car.type === "muscle" || car.type === "brute") {
+      ctx.fillStyle = car.type === "brute" ? "#15161a" : "#f4f4f4"; ctx.fillRect(W / 2 - 52, H - 92, 34, 92); ctx.fillRect(W / 2 + 18, H - 92, 34, 92);
+      ctx.fillStyle = "#0b0c0f"; rr(W / 2 - 44, H - 84, 88, 20, 8); ctx.fill();
+    }
+    ctx.restore();
+    ctx.fillStyle = "#0c0e13";
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(95, 0); ctx.lineTo(0, 270); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W, 0); ctx.lineTo(W - 95, 0); ctx.lineTo(W, 270); ctx.closePath(); ctx.fill();
+    const rg = ctx.createLinearGradient(0, 0, 0, 50); rg.addColorStop(0, "#0c0e13"); rg.addColorStop(1, "rgba(12,14,19,0)");
+    ctx.fillStyle = rg; ctx.fillRect(0, 0, W, 50);
+    ctx.fillStyle = "#0c0e13"; rr(W / 2 - 74, 8, 148, 38, 8); ctx.fill();
+    ctx.fillStyle = "#1b2740"; rr(W / 2 - 68, 13, 136, 28, 6); ctx.fill();
   }
 
   function render() {
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 30 * shake, (Math.random() - 0.5) * 30 * shake);
     drawSky(); drawMountains(); drawRoad(); drawTrees(); drawObjects();
-    if (state !== "menu" && (inv <= 0 || Math.floor(clock * 12) % 2)) {
+    if (fpv && state !== "menu") { if (inv <= 0 || Math.floor(clock * 12) % 2) drawCockpit(); }
+    else if (state !== "menu" && (inv <= 0 || Math.floor(clock * 12) % 2)) {
       ctx.save(); ctx.translate(W / 2, HZ + K / ZP); ctx.rotate(-yaw * 0.4);        // body rolls outward in a turn
       drawCarRear(0, 0, car.w * (K / ZP) / CAMH, car.color, car.type);
       ctx.restore();
