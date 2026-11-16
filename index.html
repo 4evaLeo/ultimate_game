@@ -89,6 +89,7 @@
       if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") sel = (sel + CARS.length - 1) % CARS.length;
       if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") sel = (sel + 1) % CARS.length;
       if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "w" || e.key === "W" || e.key === "s" || e.key === "S" || e.key === "t" || e.key === "T") mode = (mode + 1) % MODES.length;
+      if (e.key === "m" || e.key === "M") mapI = (mapI + 1) % MAPS.length;
       if (e.key === "r" || e.key === "R") custom[sel].wheel = (custom[sel].wheel + 1) % WHEELS.length;
       if (e.key === "f" || e.key === "F") custom[sel].spoiler = (custom[sel].spoiler + 1) % SPOILERS.length;
       if (e.key === "Enter" || e.key === " ") start();
@@ -109,10 +110,8 @@
       if (mx > W / 2 - 230 && mx < W / 2 - 10) custom[sel].wheel = (custom[sel].wheel + 1) % WHEELS.length;
       if (mx > W / 2 + 10 && mx < W / 2 + 230) custom[sel].spoiler = (custom[sel].spoiler + 1) % SPOILERS.length;
     }
-    for (let m = 0; m < MODES.length; m++) {
-      const bx = W / 2 - 230 + m * 240;
-      if (mx > bx && mx < bx + 220 && my > 400 && my < 434) mode = m;
-    }
+    for (let m = 0; m < MAPS.length; m++) { const bx = W / 2 - 312 + m * 212; if (mx > bx && mx < bx + 200 && my > 384 && my < 414) mapI = m; }
+    for (let m = 0; m < MODES.length; m++) { const bx = W / 2 - 312 + m * 318; if (mx > bx && mx < bx + 306 && my > 424 && my < 454) mode = m; }
   });
   addEventListener("keyup", function (e) { keys[e.key] = false; });
   addEventListener("blur", function () { for (const k in keys) keys[k] = false; });
@@ -314,7 +313,7 @@
   }
   function hash(n) { return Math.abs(Math.sin(n * 12.9898) * 43758.5453) % 1; }
 
-  function drawSky() {
+  function skyAurora() {
     const g = ctx.createLinearGradient(0, 0, 0, HZ);
     g.addColorStop(0, "#050a1c"); g.addColorStop(1, "#10304a");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, HZ);
@@ -342,8 +341,83 @@
     { a: 90, b: 35, n1: 3, n2: 7, ph: 1, col: "#1b2a4a", par: 0.5, snow: 95 },
     { a: 70, b: 30, n1: 4, n2: 9, ph: 2, col: "#0c162b", par: 1, snow: 999 }
   ];
+  let mapI = 1;                    // 0 underwater tunnel, 1 aurora highway, 2 rainbow road
+  const MAPS = [
+    { name: "Underwater Tunnel", ground: ["#06303f", "#083548"], rumble: ["#0b6f80", "#1fd0e0"], road: ["#1b2f3b", "#172a35"], lane: "rgba(210,255,255,0.8)", fog0: "rgba(8,90,125,0.9)", fog1: "rgba(8,90,125,0)",
+      layers: [{ a: 40, b: 20, n1: 3, n2: 7, ph: 1, col: "#0a4963", par: 0.5, snow: 999 }, { a: 28, b: 16, n1: 4, n2: 9, ph: 2, col: "#06324a", par: 1, snow: 999 }] },
+    { name: "Aurora Highway", ground: ["#0b241f", "#0e2b24"], rumble: ["#5b6b86", "#e8eef5"], road: ["#2f323d", "#2b2e38"], lane: "rgba(255,255,255,0.7)", fog0: "rgba(16,48,74,0.9)", fog1: "rgba(16,48,74,0)", layers: LAYERS },
+    { name: "Rainbow Road", ground: ["#07041a", "#090624"], rumble: ["#ffffff", "#ff4fd8"], road: ["#2f323d", "#2b2e38"], lane: "rgba(255,255,255,0.85)", fog0: "rgba(60,20,110,0.9)", fog1: "rgba(60,20,110,0)", layers: [], rainbow: true }
+  ];
+  function drawSky() { [skyUnder, skyAurora, skyRainbow][mapI](); }
+  function drawTrees() { [scenUnder, scenTrees, scenRainbow][mapI](); }
+
+  // Underwater tunnel: light at the end of the tube, god rays, bubbles and fish.
+  function skyUnder() {
+    const g = ctx.createLinearGradient(0, 0, 0, HZ); g.addColorStop(0, "#021a2c"); g.addColorStop(1, "#0d86b0");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, HZ);
+    for (let k = 0; k < 6; k++) {
+      const x = k * 170 + Math.sin(clock * 0.4 + k) * 30;
+      ctx.fillStyle = "rgba(160,240,255,0.07)"; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 70, 0); ctx.lineTo(x + 160, HZ); ctx.lineTo(x + 20, HZ); ctx.closePath(); ctx.fill();
+    }
+    for (let k = 0; k < 4; k++) {
+      const fx = ((clock * 30 * (k + 1) + k * 300) % (W + 160)) - 80, fy = 50 + k * 34 + Math.sin(clock + k) * 6;
+      ctx.fillStyle = "rgba(4,36,56,0.8)"; ctx.beginPath(); ctx.ellipse(fx, fy, 16, 7, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(fx - 14, fy); ctx.lineTo(fx - 26, fy - 7); ctx.lineTo(fx - 26, fy + 7); ctx.closePath(); ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(200,250,255,0.55)"; ctx.lineWidth = 1;
+    for (const b of stars) { const y = HZ - ((clock * 24 + b.p * 40) % HZ); ctx.beginPath(); ctx.arc(b.x + Math.sin(clock + b.p) * 4, y, b.r * 2, 0, Math.PI * 2); ctx.stroke(); }
+  }
+  function scenUnder() {                                              // glass tunnel ribs with ceiling lights
+    const ref = off(dist + ZP), cd = camD(), base = Math.floor(cd / 450);
+    for (let i = 70; i >= 1; i--) {
+      const n = base + i, zw = n * 450, zA = zw - cd;
+      if (n % 3 !== 0 || zA < (fpv ? 110 : 200)) continue;
+      const p = K / zA; if (p > H - HZ) continue;
+      const s = p / CAMH, cxw = W / 2 + (off(zw) - ref - xp) * s, by = HZ + p, wall = (RW + 260) * s, hg = 1500 * s;
+      ctx.strokeStyle = n % 6 === 0 ? "#2fe0f0" : "#1796ad"; ctx.lineWidth = Math.max(1, 70 * s);
+      ctx.beginPath(); ctx.moveTo(cxw - wall, by); ctx.lineTo(cxw - wall, by - hg * 0.55);
+      ctx.bezierCurveTo(cxw - wall, by - hg * 1.35, cxw + wall, by - hg * 1.35, cxw + wall, by - hg * 0.55); ctx.lineTo(cxw + wall, by); ctx.stroke();
+      ctx.fillStyle = "rgba(200,255,255,0.9)"; ctx.fillRect(cxw - 130 * s, by - hg * 1.12, 260 * s, Math.max(1, 30 * s));
+    }
+  }
+  // Rainbow road: space sky with planet, rainbow arc and nebula; glowing orbs and rail posts beside the road.
+  function skyRainbow() {
+    const g = ctx.createLinearGradient(0, 0, 0, HZ); g.addColorStop(0, "#060120"); g.addColorStop(1, "#2a0850");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, HZ);
+    for (const b of [[180, 80, 120, "255,80,200"], [640, 60, 150, "80,160,255"], [430, 120, 110, "160,90,255"]]) {
+      const rg = ctx.createRadialGradient(b[0], b[1], 0, b[0], b[1], b[2]); rg.addColorStop(0, "rgba(" + b[3] + ",0.3)"); rg.addColorStop(1, "rgba(" + b[3] + ",0)");
+      ctx.fillStyle = rg; ctx.fillRect(b[0] - b[2], b[1] - b[2], b[2] * 2, b[2] * 2);
+    }
+    for (const s of stars) { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(clock * 2 + s.p); ctx.fillStyle = "#fff"; ctx.fillRect(s.x, s.y, s.r, s.r); }
+    ctx.globalAlpha = 0.55; ctx.lineWidth = 9;
+    for (let i = 0; i < 7; i++) { ctx.strokeStyle = "hsl(" + (i * 50) + ",90%,60%)"; ctx.beginPath(); ctx.arc(W / 2, HZ + 80, 190 - i * 9, Math.PI, 2 * Math.PI); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    const pg = ctx.createRadialGradient(780, 70, 4, 780, 70, 44); pg.addColorStop(0, "#ffd6f5"); pg.addColorStop(1, "#7a3cc9");
+    ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(780, 70, 40, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255,230,255,0.7)"; ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(780, 70, 72, 14, -0.3, 0, Math.PI * 2); ctx.stroke();
+  }
+  function scenRainbow() {
+    const ref = off(dist + ZP), cd = camD(), base = Math.floor(cd / 450);
+    for (let i = 70; i >= 1; i--) {
+      const n = base + i, zw = n * 450, zA = zw - cd;
+      if (zA < (fpv ? 110 : 200)) continue;
+      const p = K / zA; if (p > H - HZ) continue;
+      const s = p / CAMH, by = HZ + p, hue = (n * 37 + clock * 80) % 360;
+      for (let side = -1; side <= 1; side += 2) {
+        const cxw = W / 2 + (side * (RW + 70) - xp + off(zw) - ref) * s;
+        ctx.fillStyle = "hsl(" + hue + ",90%,60%)"; ctx.fillRect(cxw - 20 * s, by - 170 * s, 40 * s, 170 * s);        // rail post
+        const hv = hash(n * side + 3);
+        if (hv > 0.45) {                                                                                           // floating orb
+          const ox = W / 2 + (side * (RW + 500 + hv * 1100) - xp + off(zw) - ref) * s, oy = by - (500 + hv * 900 + Math.sin(clock * 2 + n) * 80) * s, r = (90 + hv * 80) * s;
+          ctx.fillStyle = "hsla(" + ((hue + 120) % 360) + ",95%,65%,0.25)"; ctx.beginPath(); ctx.arc(ox, oy, r * 1.8, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "hsl(" + ((hue + 120) % 360) + ",95%,70%)"; ctx.beginPath(); ctx.arc(ox, oy, r, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+  }
+
   function drawMountains() {
-    for (const L of LAYERS) {
+    for (const L of MAPS[mapI].layers) {
       const sc = (bgScroll * L.par) % W;
       for (let x = 0; x < W; x += 4) {
         const xs = (((x - sc) % W) + W) % W, u = (xs / W) * Math.PI;
@@ -356,29 +430,31 @@
 
   // The road is drawn one screen row at a time. Rows near the horizon are far away.
   function drawRoad() {
-    const ref = off(dist + ZP);
+    const M = MAPS[mapI], ref = off(dist + ZP);
     for (let y = HZ + 1; y < H; y++) {
       const p = y - HZ, z = K / p, zw = camD() + z, s = p / CAMH;
       const far = z > 6000;
       const stripe = far ? 0 : Math.floor(zw / 300) & 1;
       const cx = W / 2 + (off(zw) - ref - xp) * s;
-      ctx.fillStyle = stripe ? "#0b241f" : "#0e2b24"; ctx.fillRect(0, y, W, 1);
-      ctx.fillStyle = stripe ? "#5b6b86" : "#e8eef5";
+      ctx.fillStyle = stripe ? M.ground[0] : M.ground[1]; ctx.fillRect(0, y, W, 1);
+      ctx.fillStyle = stripe ? M.rumble[0] : M.rumble[1];
       ctx.fillRect(cx - (RW + 160) * s, y, 2 * (RW + 160) * s, 1);
-      ctx.fillStyle = stripe ? "#2f323d" : "#2b2e38";
-      ctx.fillRect(cx - RW * s, y, 2 * RW * s, 1);
+      if (M.rainbow) {
+        const bw = 2 * RW * s / 8;
+        for (let i = 0; i < 8; i++) { ctx.fillStyle = "hsl(" + (((i * 45 + zw * 0.1 + clock * 50) % 360) | 0) + ",80%," + (stripe ? 40 : 46) + "%)"; ctx.fillRect(cx - RW * s + i * bw, y, bw + 1, 1); }
+      } else { ctx.fillStyle = stripe ? M.road[0] : M.road[1]; ctx.fillRect(cx - RW * s, y, 2 * RW * s, 1); }
       if (!far && (Math.floor(zw / 260) & 1) === 0) {
-        ctx.fillStyle = "rgba(255,255,255,0.7)";
+        ctx.fillStyle = M.lane;
         const lw = Math.max(1, 22 * s);
         for (const lx of [-650, 0, 650]) ctx.fillRect(cx + lx * s - lw / 2, y, lw, 1);
       }
     }
     const fog = ctx.createLinearGradient(0, HZ, 0, HZ + 70);
-    fog.addColorStop(0, "rgba(16,48,74,0.9)"); fog.addColorStop(1, "rgba(16,48,74,0)");
+    fog.addColorStop(0, M.fog0); fog.addColorStop(1, M.fog1);
     ctx.fillStyle = fog; ctx.fillRect(0, HZ, W, 70);
   }
 
-  function drawTrees() {
+  function scenTrees() {
     const ref = off(dist + ZP), cd = camD(), base = Math.floor(cd / 450);
     for (let i = 70; i >= 1; i--) {
       const n = base + i, zw = n * 450, zA = zw - cd;
@@ -725,16 +801,20 @@
         txt("Wheels (R): " + WHEELS[cu.wheel].name, bx + 42, 360, 15, "#fff", "left", "700");
       } else txt("Spoiler (F): " + SPOILERS[cu.spoiler], bx + 14, 360, 15, "#fff", "left", "700");
     }
-    txt("Traffic mode  (Up / Down or click)", W / 2, 394, 14, "#e6eefc", "center", "500");
-    for (let m = 0; m < MODES.length; m++) {
-      const bx = W / 2 - 230 + m * 240, on = m === mode;
-      ctx.fillStyle = on ? "rgba(125,255,178,0.28)" : "rgba(255,255,255,0.07)"; rr(bx, 400, 220, 34, 10); ctx.fill();
+    for (let m = 0; m < MAPS.length; m++) {
+      const bx = W / 2 - 312 + m * 212, on = m === mapI;
+      ctx.fillStyle = on ? "rgba(125,255,178,0.28)" : "rgba(255,255,255,0.07)"; rr(bx, 384, 200, 30, 10); ctx.fill();
       if (on) { ctx.strokeStyle = "#7dffb2"; ctx.lineWidth = 3; ctx.stroke(); }
-      txt(MODES[m].name, bx + 110, 424, 17, on ? "#fff" : "#9fb4d6", "center", "700");
+      txt(MAPS[m].name, bx + 100, 405, 15, on ? "#fff" : "#9fb4d6", "center", "700");
     }
-    txt("Left / Right or click to choose a car  |  Arrows to drive  |  C: camera", W / 2, 458, 15, "#e6eefc", "center", "500");
-    txt("Near misses refill fuel. Drive fast for bonus points.", W / 2, 478, 15, "#ffd166", "center", "600");
-    txt("Press Enter or Space to start", W / 2, 516, 26, blink, "center", "700");
+    for (let m = 0; m < MODES.length; m++) {
+      const bx = W / 2 - 312 + m * 318, on = m === mode;
+      ctx.fillStyle = on ? "rgba(125,255,178,0.28)" : "rgba(255,255,255,0.07)"; rr(bx, 424, 306, 30, 10); ctx.fill();
+      if (on) { ctx.strokeStyle = "#7dffb2"; ctx.lineWidth = 3; ctx.stroke(); }
+      txt("Traffic: " + MODES[m].name.replace(" Traffic", ""), bx + 153, 445, 15, on ? "#fff" : "#9fb4d6", "center", "700");
+    }
+    txt("Map (M)   Traffic (T / Up / Down)   Car (Left / Right)   Camera (C)   Drive with the arrows", W / 2, 482, 14, "#e6eefc", "center", "500");
+    txt("Press Enter or Space to start", W / 2, 520, 26, blink, "center", "700");
   }
 
   // First-person view: hood, pillars, mirror, dash with gauges, and a steering wheel that turns with the car.
