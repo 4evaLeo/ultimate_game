@@ -6,7 +6,7 @@
 <title>Aurora Run 3D</title>
 <style>
   html, body { margin: 0; height: 100%; background: #05080f; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-  canvas { width: min(100vw, 177.78vh); height: auto; aspect-ratio: 16 / 9; display: block; background: #000; }
+  canvas { touch-action: none; -webkit-user-select: none; user-select: none; width: min(100vw, 177.78vh); height: auto; aspect-ratio: 16 / 9; display: block; background: #000; }
 </style>
 </head>
 <body>
@@ -22,96 +22,231 @@
   const HZ = 200;                  // horizon row on screen
   const K = 68000, CAMH = 819;     // perspective constants (row p below horizon = K / distance)
   const ZP = 252;                  // how far ahead of the camera the player car sits
-  const RW = 1000;                 // road half width (world units)
-  const LANES = [-667, 0, 667];
-  const PWW = 400;                 // player car width (world units)
-  const MIN_SPEED = 1500, MAX_SPEED = 4200, CRUISE = 2400;
-  const START_LIVES = 3;
+  const RW = 1300;                 // road half width (world units)
+  const LANES = [-975, -325, 325, 975];   // 4 lanes, 650 wide each
+    const MIN_SPEED = 1500, MAX_SPEED = 4200, CRUISE = 2400;
+  const CARS = [
+    { name: "Falcon",   desc: "Balanced all-rounder",  type: "sport",  color: "#e63946", w: 400, maxSp: 4200, acc: 1400, lock: 0.26, grip: 5,   lives: 3, fuel: 1,    st: [0.6, 0.6, 0.5, 0.5] },
+    { name: "Bolt",     desc: "Fast but twitchy",      type: "sport",  color: "#ffd60a", w: 390, maxSp: 4700, acc: 1900, lock: 0.22, grip: 3.2, lives: 2, fuel: 1.15, st: [1.0, 0.3, 0.3, 0.2] },
+    { name: "Cruiser",  desc: "Sips fuel, grips well", type: "sedan",  color: "#2dc653", w: 410, maxSp: 3800, acc: 1200, lock: 0.30, grip: 7.5, lives: 3, fuel: 0.65, st: [0.4, 0.9, 1.0, 0.5] },
+    { name: "Titan",    desc: "Slow, 5 lives",         type: "van",    color: "#4895ef", w: 440, maxSp: 3600, acc: 1000, lock: 0.24, grip: 5.5, lives: 5, fuel: 1,    st: [0.3, 0.5, 0.5, 1.0] },
+    { name: "Stallion", desc: "Raw V8 muscle",         type: "muscle", color: "#1d4ed8", w: 430, maxSp: 4500, acc: 1700, lock: 0.25, grip: 3.8, lives: 3, fuel: 1.3,  st: [0.9, 0.4, 0.2, 0.6] },
+    { name: "Brute",    desc: "Heavy-hitting bruiser", type: "brute",  color: "#f97316", w: 440, maxSp: 4400, acc: 1600, lock: 0.24, grip: 4.2, lives: 4, fuel: 1.25, st: [0.85, 0.45, 0.2, 0.8] }
+  ];
+    let car = CARS[0], sel = 0;
+  const LEN = 520;                 // car length used for traffic collisions
   const FUEL_DRAIN = 3.5;          // fuel lost per second
   const NEAR_GAP = 180;            // world units: how close counts as a near miss
   const NEAR_FUEL = 14;            // fuel gained per near miss
   const COLORS = ["#4cc9f0", "#f4d35e", "#8ac926", "#b5179e", "#ff9f1c", "#e5e5e5"];
 
+  // Score levels where new dangers switch on (change these to taste)
+  const ANIMAL_AT = 600, RIVAL_AT = 1000, POLICE_AT = 1400;
+  const FAST_START = 3000;         // speed where the speed bonus starts (full bonus at MAX_SPEED)
+  const UNLOCKS = [
+    { k: "animal", at: ANIMAL_AT, txt: "WILDLIFE ON THE ROAD!" },
+    { k: "rival", at: RIVAL_AT, txt: "RIVAL RACERS JOIN IN!" },
+    { k: "police", at: POLICE_AT, txt: "POLICE ON PATROL!" }
+  ];
+
   // The road bends left and right. This function says how far the road centre is shifted.
-  const off = function (z) { return 1100 * Math.sin(z * 0.00035) + 500 * Math.sin(z * 0.0009 + 1.3); };
+  const off = function (z) { return 800 * Math.sin(z * 0.00022) + 300 * Math.sin(z * 0.0005 + 1.3); };
 
   // ---------- Game state ----------
   const keys = {};
   let state = "menu";              // "menu" | "play" | "over"
   let best = 0, clock = 0, shake = 0, overAt = 0, bgScroll = 0;
   let xp, objs, popups, score, fuel, lives, speed, dist, t, spawnT, inv, reason;
+  let steer, yaw, vx, animalT, rivalT, policeT, unl, banner;
 
   function reset() {
-    xp = 0; objs = []; popups = [];
-    score = 0; fuel = 100; lives = START_LIVES;
+    xp = 0; steer = yaw = vx = 0; objs = []; popups = [];
+    score = 0; fuel = 100; lives = car.lives;
     speed = CRUISE; dist = 0; t = 0; spawnT = 0.8; inv = 0; reason = "";
+    animalT = 1.5; rivalT = 2; policeT = 3; unl = {}; banner = null;
   }
   reset();
 
   // ---------- Input ----------
+  function start() { car = CARS[sel]; reset(); state = "play"; }
   addEventListener("keydown", function (e) {
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].indexOf(e.key) >= 0) e.preventDefault();
     keys[e.key] = true;
-    if ((e.key === "Enter" || e.key === " ") && state !== "play") {
-      if (state === "over" && Date.now() - overAt < 600) return;
-      reset(); state = "play";
+    if (state === "menu") {
+      if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") sel = (sel + CARS.length - 1) % CARS.length;
+      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") sel = (sel + 1) % CARS.length;
+      if (e.key === "Enter" || e.key === " ") start();
+    } else if (state === "over") {
+      if (Date.now() - overAt < 600) return;
+      if (e.key === "Enter" || e.key === " ") start();
+      if (e.key === "m" || e.key === "M" || e.key === "Escape") state = "menu";
+    } else if (e.key === "Escape") state = "menu";
+  });
+  cv.addEventListener("click", function (e) {
+    if (state !== "menu") return;
+    const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) * W / r.width, my = (e.clientY - r.top) * H / r.height;
+    for (let i = 0; i < CARS.length; i++) {
+      const x0 = 22 + i * 154;
+      if (mx > x0 && mx < x0 + 146 && my > 118 && my < 368) { if (sel === i) start(); else sel = i; }
     }
   });
   addEventListener("keyup", function (e) { keys[e.key] = false; });
   addEventListener("blur", function () { for (const k in keys) keys[k] = false; });
 
   // ---------- Traffic ----------
-  function spawn() {
-    const z = dist + 7000;
+  function speedFactor() { return Math.max(0, Math.min(1, (speed - FAST_START) / (car.maxSp - FAST_START))); }
+  function hasKind(k) { return objs.some(function (o) { return o.kind === k; }); }
+
+  // Picks a lane with room, or -1 if the road is already crowded at that distance.
+  function freeLane(z) {
     const taken = {};
-    for (const o of objs) if (Math.abs(o.z - z) < 1300) taken[o.lane] = true;
-    if (Object.keys(taken).length >= 2) return;           // never block the whole road
+    for (const o of objs) if (o.lane >= 0 && Math.abs(o.z - z) < 1300) taken[o.lane] = true;
+    if (Object.keys(taken).length >= 3) return -1;       // never block the whole road
     let lane;
-    do { lane = (Math.random() * 3) | 0; } while (taken[lane]);
+    do { lane = (Math.random() * 4) | 0; } while (taken[lane]);
+    return lane;
+  }
+
+  function spawn() {
+    const z = dist + 7000, lane = freeLane(z);
+    if (lane < 0) return;
     const x = LANES[lane] + (Math.random() * 180 - 90);
-    if (Math.random() < 0.22) objs.push({ lane: lane, x: x, z: z, w: 260, v: 0, rock: true, gap: 9999, done: false });
-    else objs.push({ lane: lane, x: x, z: z, w: 400, v: 600 + Math.random() * 500,
+    const r = Math.random(), type = r < 0.25 ? "van" : r < 0.55 ? "sport" : "sedan";
+    if (Math.random() < 0.22) objs.push({ kind: "rock", lane: lane, x: x, z: z, w: 260, v: 0, rock: true, gap: 9999, done: false });
+    else objs.push({ kind: "car", lane: lane, x: x, z: z, w: type === "van" ? 440 : 400, type: type, v: 600 + Math.random() * 500,
                      color: COLORS[(Math.random() * COLORS.length) | 0], gap: 9999, done: false });
+  }
+
+  // Animals wait at the roadside and suddenly jump across when you get close.
+  function spawnAnimal() {
+    const side = Math.random() < 0.5 ? -1 : 1, boar = Math.random() < 0.35;
+    objs.push({ kind: "animal", boar: boar, lane: -1, x: side * (RW + 380), tx: -side * (RW + 380), z: dist + 5200,
+                w: boar ? 220 : 300, v: 0, vx: boar ? 2200 : 1700, trig: boar ? 0.85 : 1.0, state: "wait", jt: 0,
+                color: boar ? "#4a3a33" : "#9a6a3a", gap: 9999, done: false });
+  }
+
+  // Rivals weave between lanes. Catch up and overtake them for a big bonus.
+  function spawnRival() {
+    const z = dist + 7000, lane = freeLane(z);
+    if (lane < 0) return false;
+    objs.push({ kind: "rival", lane: lane, x: LANES[lane], tl: LANES[lane], lt: 1 + Math.random() * 2, z: z, w: 400, type: "sport",
+                v: 1900 + Math.random() * 700, color: "#ff2bd6", gap: 9999, done: false });
+    popups.push({ txt: "RIVAL AHEAD!", x: W / 2, y: 300, t: 1.2, color: "#ff7bf0" });
+    return true;
+  }
+
+  // Police cars slowly steer toward your lane to block you.
+  function spawnPolice() {
+    const z = dist + 7000, lane = freeLane(z);
+    if (lane < 0) return false;
+    objs.push({ kind: "police", lane: lane, x: LANES[lane], z: z, w: 420, type: "sedan",
+                v: 1300 + Math.random() * 400, color: "#e9edf5", gap: 9999, done: false });
+    popups.push({ txt: "POLICE!", x: W / 2, y: 300, t: 1.2, color: "#7db7ff" });
+    return true;
+  }
+
+  function isCar(o) { return o.kind === "car" || o.kind === "rival" || o.kind === "police"; }
+  function overlapX(a, b, m) { return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + m; }
+  // Cars slow down to the speed of whatever is in front of them, and weaving cars look for a free lane.
+  function trafficSpeeds(dt) {
+    for (const a of objs) {
+      if (!isCar(a)) continue;
+      if (a.v0 === undefined) a.v0 = a.v;
+      let front = null, fd = 1e9;
+      for (const b of objs) if (b !== a && isCar(b) && overlapX(a, b, 60)) { const d = b.z - a.z; if (d > 0 && d < fd) { fd = d; front = b; } }
+      let want = a.v0;
+      if (front && fd < 1300) {
+        want = Math.min(a.v0, front.v * (fd < LEN + 250 ? 0.85 : 1));
+        if (a.kind === "rival" && fd < 1000) {
+          for (const x of LANES) {
+            const ok = !objs.some(function (b) { return b !== a && isCar(b) && Math.abs(b.x - x) < (a.w + b.w) / 2 + 80 && b.z - a.z > -LEN * 1.3 && b.z - a.z < 1300; });
+            if (ok && Math.abs(x - a.x) < 800) { a.tl = x; a.lt = 1.5 + Math.random() * 2; break; }
+          }
+        }
+      }
+      a.v += (want - a.v) * Math.min(1, 4 * dt);
+    }
+  }
+  // Hard rule: two cars can never overlap. The car behind is held back.
+  function separate() {
+    for (const a of objs) {
+      if (!isCar(a)) continue;
+      for (const b of objs) if (a !== b && isCar(b) && a.z <= b.z && overlapX(a, b, 0) && b.z - a.z < LEN) { a.z = b.z - LEN; a.v = Math.min(a.v, b.v); }
+    }
+  }
+
+  function behave(o, dt, pz) {
+    if (o.kind === "rival") {
+      o.lt -= dt;
+      if (o.lt <= 0) { o.tl = LANES[(Math.random() * 4) | 0] + (Math.random() * 120 - 60); o.lt = 1.5 + Math.random() * 2; }
+      o.x += Math.max(-600 * dt, Math.min(600 * dt, o.tl - o.x));
+    } else if (o.kind === "police") {
+      if (o.z - pz < 4500) o.x += Math.max(-450 * dt, Math.min(450 * dt, Math.max(-(RW - 250), Math.min(RW - 250, xp)) - o.x));
+    } else if (o.kind === "animal") {
+      if (o.state === "wait" && (o.z - pz) / Math.max(speed, 1) < o.trig) o.state = "jump";
+      if (o.state === "jump") {
+        o.jt += dt;
+        const dir = o.tx > o.x ? 1 : -1;
+        o.x += dir * o.vx * dt;
+        if ((o.tx - o.x) * dir <= 0) { o.x = o.tx; o.state = "done"; }
+      }
+    }
   }
 
   function endGame(why) {
     state = "over"; reason = why; overAt = Date.now();
-    best = Math.max(best, score);
+    best = Math.max(best, Math.floor(score));
   }
 
   // ---------- Update ----------
   function update(dt) {
     t += dt;
+    if (banner) banner.t -= dt;
     const L = keys.ArrowLeft || keys.a || keys.A;
     const R = keys.ArrowRight || keys.d || keys.D;
     const U = keys.ArrowUp || keys.w || keys.W;
     const D = keys.ArrowDown || keys.s || keys.S;
 
-    if (U) speed += 1400 * dt;
+    if (U) speed += car.acc * dt;
     else if (D) speed -= 2200 * dt;
     else speed += (CRUISE - speed) * 0.8 * dt;
-    speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, speed));
+    speed = Math.max(MIN_SPEED, Math.min(car.maxSp, speed));
 
-    xp += ((R ? 1 : 0) - (L ? 1 : 0)) * 1500 * dt;
-    xp = Math.max(-(RW - 200), Math.min(RW - 200, xp));
+    // Steering: the wheel eases in, the car yaws, and sideways motion follows speed and grip (so it slides a little).
+    const tg = (R ? 1 : 0) - (L ? 1 : 0);
+    steer += (tg - steer) * Math.min(1, (tg ? 9 : 12) * dt);
+    yaw += (steer * car.lock * 1.3 * (1 - 0.3 * speedFactor()) - yaw) * Math.min(1, 12 * dt);
+    vx += (speed * Math.sin(yaw) * 2.6 - vx) * Math.min(1, car.grip * 1.5 * dt);
+    const k2 = (off(dist + ZP + 200) - 2 * off(dist + ZP) + off(dist + ZP - 200)) / 40000;   // road curvature
+    xp += (vx - k2 * speed * speed * 0.25) * dt;                                          // bends push you wide
+    if (Math.abs(xp) > RW - 200) { xp = Math.max(-(RW - 200), Math.min(RW - 200, xp)); vx *= -0.2; yaw *= 0.5; }
     dist += speed * dt;
+    score += speedFactor() * 40 * dt;            // driving fast earns points all the time
 
-    fuel -= (FUEL_DRAIN + t * 0.015) * dt;
+    fuel -= (FUEL_DRAIN + t * 0.015) * car.fuel * dt;
     if (fuel <= 0) { fuel = 0; endGame("Out of fuel"); return; }
 
     spawnT -= dt;
     if (spawnT <= 0) {
       spawn();
-      spawnT = Math.max(0.4, 1.2 - t * 0.008) * (CRUISE / speed);
+      spawnT = Math.max(0.3, 0.85 - t * 0.006) * (CRUISE / speed);
     }
     inv -= dt;
 
+    for (const u of UNLOCKS) if (!unl[u.k] && score >= u.at) { unl[u.k] = true; banner = { txt: u.txt, t: 3.5 }; }
+    if (score >= ANIMAL_AT && (animalT -= dt) <= 0) { spawnAnimal(); animalT = 5 + Math.random() * 5; }
+    if (score >= RIVAL_AT && (rivalT -= dt) <= 0) rivalT = hasKind("rival") ? 3 : spawnRival() ? 12 + Math.random() * 8 : 1;
+    if (score >= POLICE_AT && (policeT -= dt) <= 0) policeT = hasKind("police") ? 3 : spawnPolice() ? 14 + Math.random() * 10 : 1;
+
     const pz = dist + ZP;
+    trafficSpeeds(dt);
     for (let i = objs.length - 1; i >= 0; i--) {
-      const o = objs[i];
+      const o = objs[i], px = o.x;
       o.z += o.v * dt;
+      behave(o, dt, pz);
+      if (isCar(o) && objs.some(function (b) { return b !== o && isCar(b) && overlapX(o, b, 0) && Math.abs(o.z - b.z) < LEN; })) o.x = px;
       const dz = o.z - pz;
-      const gap = Math.abs(o.x - xp) - (o.w + PWW) / 2;
+      const gap = Math.abs(o.x - xp) - (o.w + car.w) / 2;
 
       if (Math.abs(dz) < 150 && gap < -8 && inv <= 0) {        // crash
         lives--; inv = 1.6; speed = MIN_SPEED; shake = 0.35;
@@ -123,14 +258,22 @@
       if (Math.abs(dz) < 170 && !o.done) o.gap = Math.min(o.gap, gap);
       if (!o.done && dz < -250) {                              // we have driven past it
         o.done = true;
+        const mult = 1 + speedFactor();
         if (o.gap >= 0 && o.gap < NEAR_GAP) {
-          const pts = 100 + Math.round(((speed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED)) * 100);
+          const pts = Math.round((100 + ((speed - MIN_SPEED) / (car.maxSp - MIN_SPEED)) * 100) * mult);
           score += pts; fuel = Math.min(100, fuel + NEAR_FUEL);
-          popups.push({ txt: "NEAR MISS +" + pts, x: W / 2, y: 340, t: 1, color: "#7dffb2" });
+          popups.push({ txt: "NEAR MISS +" + pts + (mult > 1.05 ? "  x" + mult.toFixed(1) : ""), x: W / 2, y: 340, t: 1, color: "#7dffb2" });
+        }
+        if (o.kind === "rival" || o.kind === "police") {
+          const bonus = Math.round((o.kind === "rival" ? 250 : 150) * mult);
+          score += bonus;
+          popups.push({ txt: (o.kind === "rival" ? "OVERTAKE +" : "POLICE PASSED +") + bonus, x: W / 2, y: 300, t: 1.2,
+                        color: o.kind === "rival" ? "#ff7bf0" : "#7db7ff" });
         }
       }
-      if (o.z < dist - 100) objs.splice(i, 1);
+      if (o.z < dist - 100 || o.z > dist + 12000) objs.splice(i, 1);
     }
+    separate();
   }
 
   // ---------- Drawing helpers ----------
@@ -203,8 +346,7 @@
       if (!far && (Math.floor(zw / 260) & 1) === 0) {
         ctx.fillStyle = "rgba(255,255,255,0.7)";
         const lw = Math.max(1, 22 * s);
-        ctx.fillRect(cx - 333 * s - lw / 2, y, lw, 1);
-        ctx.fillRect(cx + 333 * s - lw / 2, y, lw, 1);
+        for (const lx of [-650, 0, 650]) ctx.fillRect(cx + lx * s - lw / 2, y, lw, 1);
       }
     }
     const fog = ctx.createLinearGradient(0, HZ, 0, HZ + 70);
@@ -235,22 +377,183 @@
     }
   }
 
-  // A car seen from behind, w pixels wide, standing on row by.
-  function drawCarRear(cx, by, w, color) {
-    const h = w * 0.62;
-    ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.beginPath(); ctx.ellipse(cx, by, w * 0.55, h * 0.12, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#101114";
-    ctx.fillRect(cx - w / 2, by - h * 0.3, w * 0.16, h * 0.3); ctx.fillRect(cx + w / 2 - w * 0.16, by - h * 0.3, w * 0.16, h * 0.3);
-    ctx.fillStyle = color; rr(cx - w / 2 + w * 0.03, by - h * 0.62, w * 0.94, h * 0.5, w * 0.08); ctx.fill();
-    rr(cx - w * 0.36, by - h, w * 0.72, h * 0.5, w * 0.1); ctx.fill();
-    ctx.fillStyle = "rgba(10,20,35,0.85)"; rr(cx - w * 0.3, by - h * 0.93, w * 0.6, h * 0.3, w * 0.05); ctx.fill();
-    ctx.fillStyle = "#ff2e2e";
-    ctx.fillRect(cx - w * 0.46, by - h * 0.52, w * 0.2, h * 0.1); ctx.fillRect(cx + w * 0.26, by - h * 0.52, w * 0.2, h * 0.1);
+  function shade(hex, f) {
+    const n = parseInt(hex.slice(1), 16);
+    const c = function (v) { return Math.min(255, Math.round(v * f)); };
+    return "rgb(" + c((n >> 16) & 255) + "," + c((n >> 8) & 255) + "," + c(n & 255) + ")";
+  }
+  function grad(x, y0, y1, color, hi, lo) {
+    const g = ctx.createLinearGradient(x, y0, x, y1);
+    g.addColorStop(0, shade(color, hi)); g.addColorStop(1, shade(color, lo));
+    return g;
+  }
+
+  // A car seen from behind, w pixels wide, standing on row by. type: sedan, sport, van, muscle or brute.
+  function drawCarRear(cx, by, w, color, type) {
+    const van = type === "van", sport = type === "sport", brute = type === "brute", mus = type === "muscle" || brute;
+    const h = w * (van ? 0.9 : sport ? 0.52 : mus ? 0.5 : 0.62);
+    const x0 = cx - w / 2, px = Math.max(1, w * 0.012);
+    ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.beginPath(); ctx.ellipse(cx, by, w * 0.56, h * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+    // tyres with sidewall sheen and rim edge
+    const tw = w * (mus ? 0.2 : 0.17), th = h * (mus ? 0.4 : 0.34);
+    for (const tx of [x0 - tw * 0.05, x0 + w - tw * 0.95]) {
+      ctx.fillStyle = "#0b0c0f"; rr(tx, by - th, tw, th, tw * 0.3); ctx.fill();
+      ctx.fillStyle = "#23262e"; rr(tx + tw * 0.15, by - th * 0.92, tw * 0.7, th * 0.5, tw * 0.2); ctx.fill();
+      ctx.fillStyle = "#aab3c2"; ctx.fillRect(tx + tw * 0.3, by - th * 0.8, tw * 0.4, Math.max(1, th * 0.07));
+    }
+    // body: gradient, top highlight, lower crease
+    const bTop = by - h * (van ? 0.95 : mus ? 0.58 : 0.62), bBot = by - h * 0.14;
+    ctx.fillStyle = grad(cx, bTop, bBot, color, 1.2, 0.72);
+    rr(x0 + w * 0.02, bTop, w * 0.96, bBot - bTop, w * 0.08); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(x0 + w * 0.08, bTop + h * 0.01, w * 0.84, Math.max(1, h * 0.025));
+    ctx.fillStyle = "rgba(0,0,0,0.22)"; ctx.fillRect(x0 + w * 0.04, bBot - h * 0.2, w * 0.92, Math.max(1, h * 0.035));
+    if (mus) {                                                         // bulging rear fenders
+      ctx.fillStyle = "rgba(255,255,255,0.13)";
+      rr(x0 + w * 0.03, bTop + h * 0.06, w * 0.17, bBot - bTop - h * 0.2, w * 0.06); ctx.fill();
+      rr(x0 + w * 0.80, bTop + h * 0.06, w * 0.17, bBot - bTop - h * 0.2, w * 0.06); ctx.fill();
+    }
+    let cTop = by - h;
+    if (!van) {
+      const cw = sport ? 0.62 : mus ? 0.56 : 0.72;
+      ctx.fillStyle = grad(cx, cTop, bTop, color, 1.3, 0.9);
+      rr(cx - w * cw / 2, cTop, w * cw, bTop - cTop + h * 0.04, w * 0.1); ctx.fill();
+      const gl = ctx.createLinearGradient(0, cTop, 0, bTop); gl.addColorStop(0, "rgba(30,55,85,0.95)"); gl.addColorStop(1, "rgba(5,10,20,0.95)");
+      ctx.fillStyle = gl; rr(cx - w * (cw / 2 - 0.05), cTop + h * 0.06, w * (cw - 0.1), bTop - cTop - h * 0.06, w * 0.05); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.16)";
+      ctx.beginPath(); ctx.moveTo(cx - w * 0.2, cTop + h * 0.06); ctx.lineTo(cx - w * 0.02, cTop + h * 0.06);
+      ctx.lineTo(cx - w * 0.14, bTop); ctx.lineTo(cx - w * 0.3, bTop); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.1)"; ctx.fillRect(cx + w * 0.1, cTop + h * 0.07, w * 0.04, bTop - cTop - h * 0.09);   // glass glint
+      ctx.fillStyle = "#e0262b"; ctx.fillRect(cx - w * 0.1, cTop + h * 0.1, w * 0.2, Math.max(1, h * 0.03));                   // high brake light
+      ctx.fillStyle = shade(color, 0.8);
+      rr(cx - w * cw / 2 - w * 0.07, bTop - h * 0.12, w * 0.09, h * 0.09, w * 0.02); ctx.fill();
+      rr(cx + w * cw / 2 - w * 0.02, bTop - h * 0.12, w * 0.09, h * 0.09, w * 0.02); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.fillRect(cx - w * cw / 2 - w * 0.06, bTop - h * 0.11, w * 0.06, Math.max(1, h * 0.02));
+    } else {
+      ctx.fillStyle = "rgba(10,20,35,0.88)";
+      rr(x0 + w * 0.1, bTop + h * 0.07, w * 0.37, h * 0.3, w * 0.03); ctx.fill();
+      rr(cx + w * 0.03, bTop + h * 0.07, w * 0.37, h * 0.3, w * 0.03); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.14)"; ctx.fillRect(x0 + w * 0.13, bTop + h * 0.09, w * 0.05, h * 0.26); ctx.fillRect(cx + w * 0.06, bTop + h * 0.09, w * 0.05, h * 0.26);
+      ctx.fillStyle = shade(color, 0.6);
+      ctx.fillRect(cx - Math.max(0.5, w * 0.008), bTop + h * 0.04, Math.max(1, w * 0.016), bBot - bTop - h * 0.06);
+      ctx.fillStyle = "#222"; ctx.fillRect(x0 + w * 0.05, bTop - h * 0.03, w * 0.9, Math.max(1, h * 0.03));                   // roof rail
+      ctx.fillStyle = "#bbb"; ctx.fillRect(cx - w * 0.05, bTop + h * 0.45, w * 0.03, h * 0.05); ctx.fillRect(cx + w * 0.02, bTop + h * 0.45, w * 0.03, h * 0.05);
+    }
+    if (mus) {                                                         // twin racing stripes
+      ctx.fillStyle = brute ? "#15161a" : "#f4f4f4";
+      ctx.fillRect(cx - w * 0.14, bTop + h * 0.02, w * 0.08, bBot - bTop - h * 0.2); ctx.fillRect(cx + w * 0.06, bTop + h * 0.02, w * 0.08, bBot - bTop - h * 0.2);
+      ctx.fillRect(cx - w * 0.14, cTop, w * 0.08, h * 0.05); ctx.fillRect(cx + w * 0.06, cTop, w * 0.08, h * 0.05);
+    }
+    if (sport) { ctx.fillStyle = shade(color, 0.55); rr(x0 + w * 0.04, bTop - h * 0.01, w * 0.92, h * 0.08, w * 0.02); ctx.fill(); }
+    if (mus) {
+      ctx.fillStyle = shade(color, 0.5);
+      if (brute) {                                                     // big wing on uprights
+        rr(x0 + w * 0.02, bTop - h * 0.1, w * 0.96, h * 0.07, w * 0.015); ctx.fill();
+        ctx.fillRect(x0 + w * 0.2, bTop - h * 0.04, w * 0.04, h * 0.06); ctx.fillRect(x0 + w * 0.76, bTop - h * 0.04, w * 0.04, h * 0.06);
+      } else { rr(x0 + w * 0.05, bTop - h * 0.02, w * 0.9, h * 0.07, w * 0.03); ctx.fill(); }   // ducktail
+    }
+    // tail lights
+    const ly = van ? bBot - h * 0.4 : bTop + h * 0.08;
+    const lh = h * (van ? 0.22 : 0.13), lw = w * (van ? 0.08 : 0.22);
+    if (mus && !brute) {                                               // triple vertical bars each side
+      for (let k = 0; k < 3; k++) for (const sx of [x0 + w * (0.06 + k * 0.07), x0 + w * (0.94 - k * 0.07) - w * 0.05]) {
+        ctx.fillStyle = "rgba(255,40,40,0.28)"; ctx.fillRect(sx - px, ly - h * 0.02, w * 0.05 + 2 * px, h * 0.26);
+        ctx.fillStyle = "#d81414"; ctx.fillRect(sx, ly, w * 0.05, h * 0.22);
+        ctx.fillStyle = "#ff8a5c"; ctx.fillRect(sx + w * 0.012, ly + h * 0.03, w * 0.02, h * 0.1);
+      }
+    } else if (brute) {                                                // full-width light bar
+      ctx.fillStyle = "rgba(255,40,40,0.28)"; rr(x0 + w * 0.03, ly - h * 0.03, w * 0.94, h * 0.17, h * 0.05); ctx.fill();
+      ctx.fillStyle = "#c81010"; rr(x0 + w * 0.05, ly, w * 0.9, h * 0.1, h * 0.03); ctx.fill();
+      ctx.fillStyle = "#ff6a4a"; ctx.fillRect(x0 + w * 0.08, ly + h * 0.04, w * 0.84, Math.max(1, h * 0.025));
+      ctx.fillStyle = "#15161a"; ctx.fillRect(cx - w * 0.05, ly - h * 0.005, w * 0.1, h * 0.11);
+    } else {
+      ctx.fillStyle = "rgba(255,40,40,0.25)";
+      rr(x0 - w * 0.02, ly - lh * 0.4, lw + w * 0.06, lh * 1.8, lh); ctx.fill();
+      rr(x0 + w - lw - w * 0.04, ly - lh * 0.4, lw + w * 0.06, lh * 1.8, lh); ctx.fill();
+      ctx.fillStyle = "#d81414";
+      rr(x0 + w * 0.03, ly, lw, lh, lh * 0.3); ctx.fill();
+      rr(x0 + w - lw - w * 0.03, ly, lw, lh, lh * 0.3); ctx.fill();
+      ctx.fillStyle = "#ff8a5c";
+      ctx.fillRect(x0 + w * 0.05, ly + lh * 0.35, lw * 0.6, lh * 0.3);
+      ctx.fillRect(x0 + w - w * 0.05 - lw * 0.6, ly + lh * 0.35, lw * 0.6, lh * 0.3);
+      ctx.fillStyle = "rgba(0,0,0,0.35)";                              // light slats
+      for (let k = 1; k < 4; k++) { ctx.fillRect(x0 + w * 0.03 + lw * k / 4, ly, Math.max(0.5, px * 0.5), lh); ctx.fillRect(x0 + w - lw - w * 0.03 + lw * k / 4, ly, Math.max(0.5, px * 0.5), lh); }
+      if (sport) { ctx.fillStyle = "rgba(255,50,50,0.8)"; ctx.fillRect(x0 + w * 0.25, ly + lh * 0.4, w * 0.5, Math.max(1, lh * 0.2)); }
+    }
+    // bumper, reflectors, plate with characters, badge
+    ctx.fillStyle = shade(color, 0.5);
+    rr(x0 + w * 0.03, bBot - h * 0.1, w * 0.94, h * 0.12, w * 0.03); ctx.fill();
+    ctx.fillStyle = "#e8891c"; ctx.fillRect(x0 + w * 0.05, bBot - h * 0.07, w * 0.05, h * 0.04); ctx.fillRect(x0 + w * 0.9, bBot - h * 0.07, w * 0.05, h * 0.04);
+    ctx.fillStyle = "#f2f2f2"; rr(cx - w * 0.13, bBot - h * 0.3, w * 0.26, h * 0.12, w * 0.015); ctx.fill();
+    ctx.fillStyle = "#3a4a8a"; ctx.fillRect(cx - w * 0.13, bBot - h * 0.3, w * 0.03, h * 0.12);
+    ctx.fillStyle = "#2a2f3a"; for (let k = 0; k < 5; k++) ctx.fillRect(cx - w * 0.085 + k * w * 0.04, bBot - h * 0.275, w * 0.025, h * 0.07);
+    ctx.fillStyle = "#c9ced8"; ctx.beginPath(); ctx.ellipse(cx, bBot - h * 0.4, w * 0.03, h * 0.025, 0, 0, Math.PI * 2); ctx.fill();   // badge
+    // diffuser + exhaust tips with chrome glint
+    if (sport || mus) { ctx.fillStyle = "#15161b"; ctx.fillRect(x0 + w * 0.2, bBot + h * 0.02, w * 0.6, h * 0.07); ctx.fillStyle = "#2b2e38"; for (let k = 1; k < 6; k++) ctx.fillRect(x0 + w * (0.2 + k * 0.1), bBot + h * 0.02, Math.max(0.5, px * 0.6), h * 0.07); }
+    if (!van) {
+      const ex = mus ? 0.3 : 0.26, er = mus ? 0.055 : 0.045;
+      for (const sx of [-1, 1]) {
+        ctx.fillStyle = "#1a1a1f"; ctx.beginPath(); ctx.ellipse(cx + sx * w * ex, bBot - h * 0.03, w * er, h * 0.04, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#b9c0cc"; ctx.lineWidth = Math.max(0.5, px * 0.7); ctx.stroke();
+        ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.fillRect(cx + sx * w * ex - w * er * 0.6, bBot - h * 0.045, w * er * 0.5, Math.max(0.5, h * 0.01));
+      }
+    }
   }
 
   function drawRock(cx, by, w) {
     ctx.fillStyle = "#7b8190"; ctx.beginPath(); ctx.ellipse(cx, by - w * 0.22, w / 2, w * 0.25, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#a3a9b7"; ctx.beginPath(); ctx.ellipse(cx - w * 0.1, by - w * 0.3, w * 0.22, w * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawAnimal(x, by, w, o, zA) {
+    const u = w / 100, dir = o.tx > o.x ? 1 : -1;
+    const jump = o.state === "jump", run = jump ? o.jt * 16 : 0;
+    const hop = jump ? Math.abs(Math.sin(o.jt * 8)) * 38 : 0;
+    ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.ellipse(x, by, w * 0.45, w * 0.06, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.save(); ctx.translate(x, by - hop * u); ctx.scale(u * dir, u);
+    const legH = o.boar ? 20 : 34, bodyY = -(legH + 14);
+    ctx.strokeStyle = shade(o.color, 0.7); ctx.lineWidth = 5; ctx.lineCap = "round";
+    for (let i = 0; i < 4; i++) {
+      const lx = (i < 2 ? -28 : 22) + (i % 2) * 11, sw = Math.sin(run + i * 1.6) * (jump ? 10 : 0);
+      ctx.beginPath(); ctx.moveTo(lx, bodyY + 6); ctx.lineTo(lx + sw, jump && i % 2 ? -legH * 0.5 : 0); ctx.stroke();
+    }
+    ctx.fillStyle = o.color; ctx.beginPath(); ctx.ellipse(0, bodyY, 38, o.boar ? 20 : 15, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#f4efe6"; ctx.beginPath(); ctx.ellipse(-37, bodyY - 5, 6, 5, 0, 0, Math.PI * 2); ctx.fill();   // tail
+    const hx = o.boar ? 44 : 50, hy = o.boar ? bodyY + 6 : bodyY - 30;
+    if (!o.boar) { ctx.strokeStyle = o.color; ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(30, bodyY - 6); ctx.lineTo(hx - 4, hy + 2); ctx.stroke(); }
+    ctx.fillStyle = o.color; ctx.beginPath(); ctx.ellipse(hx, hy, 13, o.boar ? 10 : 8, 0.2, 0, Math.PI * 2); ctx.fill();   // head
+    ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(hx + 4, hy - 2, 1.8, 0, Math.PI * 2); ctx.fill();                  // eye
+    if (o.boar) {
+      ctx.strokeStyle = "#f4efe6"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(hx + 10, hy + 4); ctx.lineTo(hx + 16, hy - 4); ctx.stroke();
+    } else {
+      ctx.strokeStyle = "#e8d9b8"; ctx.lineWidth = 2.5; ctx.beginPath();                                                // antlers
+      ctx.moveTo(hx - 2, hy - 6); ctx.lineTo(hx - 8, hy - 30); ctx.moveTo(hx - 8, hy - 20); ctx.lineTo(hx + 6, hy - 28);
+      ctx.moveTo(hx + 3, hy - 6); ctx.lineTo(hx + 4, hy - 32); ctx.moveTo(hx + 4, hy - 22); ctx.lineTo(hx + 17, hy - 28);
+      ctx.stroke();
+    }
+    ctx.restore();
+    if (o.state === "wait" && zA < 3800) {                         // warning sign before it jumps
+      ctx.globalAlpha = Math.floor(clock * 4) % 2 ? 1 : 0.4;
+      txt("!", x, by - w * 1.5 - 6, Math.max(14, w * 0.5), "#ffd166", "center", "900");
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawPolice(cx, by, w) {
+    drawCarRear(cx, by, w, "#e9edf5", "sedan");
+    const h = w * 0.62, f = Math.floor(clock * 6) % 2;
+    ctx.fillStyle = "#2a5bd7"; ctx.fillRect(cx - w * 0.46, by - h * 0.3, w * 0.92, Math.max(1, h * 0.06));
+    ctx.fillStyle = f ? "rgba(255,40,40,0.3)" : "rgba(60,120,255,0.3)";
+    ctx.beginPath(); ctx.ellipse(cx, by - h, w * 0.5, h * 0.35, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = f ? "#ff2a2a" : "#7a1010"; ctx.fillRect(cx - w * 0.2, by - h * 1.06, w * 0.2, h * 0.09);
+    ctx.fillStyle = f ? "#10206a" : "#3a7bff"; ctx.fillRect(cx, by - h * 1.06, w * 0.2, h * 0.09);
+  }
+
+  function drawRival(cx, by, w, color) {
+    const h = w * 0.52;
+    ctx.fillStyle = "rgba(255,43,214,0.35)"; ctx.beginPath(); ctx.ellipse(cx, by, w * 0.62, h * 0.14, 0, 0, Math.PI * 2); ctx.fill();   // neon underglow
+    drawCarRear(cx, by, w, color, "sport");
+    ctx.fillStyle = "rgba(255,255,255,0.85)";                                                                                       // racing stripes
+    ctx.fillRect(cx - w * 0.24, by - h * 0.74, w * 0.05, h * 0.6); ctx.fillRect(cx + w * 0.19, by - h * 0.74, w * 0.05, h * 0.6);
   }
 
   function drawObjects() {
@@ -261,13 +564,18 @@
       if (zA < 200 || zA > 7500) continue;
       const p = K / zA, s = p / CAMH;
       const x = W / 2 + (o.x - xp + off(o.z) - ref) * s, by = HZ + p;
-      if (o.rock) drawRock(x, by, o.w * s); else drawCarRear(x, by, o.w * s, o.color);
+      const ww = o.w * s;
+      if (o.rock) drawRock(x, by, ww);
+      else if (o.kind === "animal") drawAnimal(x, by, ww, o, zA);
+      else if (o.kind === "police") drawPolice(x, by, ww);
+      else if (o.kind === "rival") drawRival(x, by, ww, o.color);
+      else drawCarRear(x, by, ww, o.color, o.type);
     }
   }
 
   function drawHud() {
     ctx.fillStyle = "rgba(0,0,0,0.38)"; ctx.fillRect(0, 0, W, 72);
-    txt("Score " + score, 20, 34, 24, "#ffffff", "left", "700");
+    txt("Score " + Math.floor(score), 20, 34, 24, "#ffffff", "left", "700");
     txt("Best " + best, 20, 58, 15, "#b9c6de", "left", "500");
     txt("Fuel", 330, 41, 16, "#b9c6de", "right", "500");
     ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(344, 28, 240, 16);
@@ -275,18 +583,61 @@
     ctx.fillRect(344, 28, 2.4 * fuel, 16);
     txt("\u2665".repeat(Math.max(0, lives)), W - 20, 42, 30, "#ff5d6c", "right", "400");
     txt(Math.round(speed / 20) + " km/h", W - 20, H - 18, 22, "#e6eefc", "right", "700");
+    const sf = speedFactor(), mult = 1 + sf;                    // speed bonus meter
+    txt("Speed", 330, 62, 13, "#b9c6de", "right", "500");
+    ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(344, 54, 240, 8);
+    ctx.fillStyle = sf >= 1 ? "#ff3d00" : "#ffb703"; ctx.fillRect(344, 54, 240 * sf, 8);
+    txt(sf >= 1 ? "TURBO x2.0" : "x" + mult.toFixed(1), 594, 63, 14, sf >= 1 ? "#ff7a45" : "#ffd166", "left", "700");
+    if (banner && banner.t > 0) { ctx.globalAlpha = Math.min(1, banner.t); txt(banner.txt, W / 2, 112, 30, "#ffd166", "center", "800"); ctx.globalAlpha = 1; }
   }
 
   function overlay(lines) {
     ctx.fillStyle = "rgba(3,8,20,0.68)"; ctx.fillRect(0, 0, W, H);
     for (const l of lines) txt(l[0], W / 2, l[1], l[2], l[3], "center", l[4]);
   }
+  function drawMenu(blink) {
+    ctx.fillStyle = "rgba(3,8,20,0.74)"; ctx.fillRect(0, 0, W, H);
+    txt("AURORA RUN 3D", W / 2, 66, 46, "#7dffb2", "center", "800");
+    txt("Choose your car", W / 2, 98, 20, "#e6eefc", "center", "500");
+    const labels = ["Speed", "Handling", "Economy", "Armor"];
+    for (let i = 0; i < CARS.length; i++) {
+      const c = CARS[i], x0 = 22 + i * 154, y0 = 118, on = i === sel;
+      ctx.fillStyle = on ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.06)"; rr(x0, y0, 146, 250, 14); ctx.fill();
+      if (on) { ctx.strokeStyle = "#7dffb2"; ctx.lineWidth = 3; ctx.stroke(); }
+      drawCarRear(x0 + 73, y0 + 100, 96 * c.w / 400, c.color, c.type);
+      txt(c.name, x0 + 73, y0 + 138, 20, "#fff", "center", "800");
+      txt(c.desc, x0 + 73, y0 + 157, 11, "#b9c6de", "center", "500");
+      for (let j = 0; j < 4; j++) {
+        const yy = y0 + 178 + j * 17;
+        txt(labels[j], x0 + 9, yy + 8, 11, "#b9c6de", "left", "500");
+        ctx.fillStyle = "rgba(255,255,255,0.18)"; ctx.fillRect(x0 + 62, yy, 76, 8);
+        ctx.fillStyle = c.color; ctx.fillRect(x0 + 62, yy, 76 * c.st[j], 8);
+      }
+    }
+    txt("Left / Right or click to choose  |  Arrows to drive", W / 2, 396, 16, "#e6eefc", "center", "500");
+    txt("Near misses refill fuel. Drive fast for bonus points.", W / 2, 416, 15, "#ffd166", "center", "600");
+    txt("Press Enter or Space to start", W / 2, 470, 26, blink, "center", "700");
+  }
 
   function render() {
     ctx.save();
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 30 * shake, (Math.random() - 0.5) * 30 * shake);
     drawSky(); drawMountains(); drawRoad(); drawTrees(); drawObjects();
-    if (inv <= 0 || Math.floor(clock * 12) % 2) drawCarRear(W / 2, HZ + K / ZP, PWW * (K / ZP) / CAMH, "#e63946");
+    if (state !== "menu" && (inv <= 0 || Math.floor(clock * 12) % 2)) {
+      ctx.save(); ctx.translate(W / 2, HZ + K / ZP); ctx.rotate(-yaw * 0.4);        // body rolls outward in a turn
+      drawCarRear(0, 0, car.w * (K / ZP) / CAMH, car.color, car.type);
+      ctx.restore();
+    }
+    if (state === "play" && speedFactor() > 0) {                 // speed streaks at the screen edges
+      const sf = speedFactor();
+      ctx.strokeStyle = "rgba(255,255,255," + (0.12 + sf * 0.25) + ")"; ctx.lineWidth = 2; ctx.beginPath();
+      for (let i = 0; i < 18; i++) {
+        const left = Math.random() < 0.5, x = left ? Math.random() * 220 : W - Math.random() * 220;
+        const y = HZ + 30 + Math.random() * (H - HZ - 30), len = 30 + sf * 70;
+        ctx.moveTo(x, y); ctx.lineTo(x + (left ? -1 : 1) * len * 0.3, y + len);
+      }
+      ctx.stroke();
+    }
     for (const p of popups) { ctx.globalAlpha = Math.max(0, p.t); txt(p.txt, p.x, p.y, 28, p.color, "center", "800"); }
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -294,22 +645,16 @@
     if (state !== "menu") drawHud();
     const blink = Math.floor(clock * 2) % 2 ? "#ffffff" : "#9fb4d6";
     if (state === "menu") {
-      overlay([
-        ["AURORA RUN 3D", 170, 56, "#7dffb2", "800"],
-        ["Arrow keys: steer, speed up, slow down", 245, 20, "#e6eefc", "500"],
-        ["Pass close to cars for near misses", 280, 20, "#e6eefc", "500"],
-        ["Near misses give points and refill fuel", 315, 20, "#e6eefc", "500"],
-        ["You have 3 lives. Do not run out of fuel.", 350, 20, "#e6eefc", "500"],
-        ["Press Enter or Space to start", 430, 24, blink, "700"]
-      ]);
+      drawMenu(blink);
     } else if (state === "over") {
       overlay([
         ["GAME OVER", 190, 56, "#ff7b7b", "800"],
         [reason, 235, 22, "#e6eefc", "500"],
-        ["Score " + score, 300, 34, "#ffffff", "700"],
+        ["Score " + Math.floor(score), 300, 34, "#ffffff", "700"],
         ["Best " + best, 340, 22, "#b9c6de", "500"],
-        ["Press Enter or Space to try again", 430, 24, blink, "700"]
+        ["Enter / Space: retry     M: car menu", 420, 18, blink, "600"]
       ]);
+
     }
   }
 
